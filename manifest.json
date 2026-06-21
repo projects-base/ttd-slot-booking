@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "TTD Seva Booking Bot",
+  "version": "2.0",
+  "description": "Auto-fills TTD Arjitha Seva booking — pilgrim & contact details",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "tabs", "alarms"],
+  "host_permissions": ["https://ttdevasthanams.ap.gov.in/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "TTD Seva Bot",
+    "default_icon": {
+      "16":  "icon16.png",
+      "32":  "icon32.png",
+      "48":  "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16":  "icon16.png",
+    "32":  "icon32.png",
+    "48":  "icon48.png",
+    "128": "icon128.png"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [{
+    "matches": ["https://ttdevasthanams.ap.gov.in/*"],
+    "js": ["data.js", "content.js"],
+    "run_at": "document_idle"
+  }]
+}
