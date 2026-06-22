@@ -1,7 +1,8 @@
 /* ================================================================
-   TTD Seva Booking Bot — content.js  v3.0
+   TTD Seva Booking Bot — content.js
    Selector strategy: NO hashed CSS class names.
    Uses: text content, input[name], ARIA roles, URL paths, DOM structure.
+   Supports: Arjitha Seva + Special Entry booking modes.
    ================================================================ */
 
 let botConfig = null;
@@ -112,6 +113,29 @@ async function selectDropdown(inputEl, optionText) {
   return false;
 }
 
+function normalizeTimeStr(str) {
+  if (!str) return null;
+  const match = str.toLowerCase().match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/);
+  if (!match) return null;
+  const hr = parseInt(match[1], 10);
+  const min = match[2] ? parseInt(match[2], 10) : 0;
+  const ampm = match[3];
+  return `${hr}:${String(min).padStart(2, '0')} ${ampm}`;
+}
+
+function elementMatchesTime(elText, targetNormalized) {
+  if (!elText) return false;
+  const regex = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/gi;
+  const matches = elText.toLowerCase().match(regex);
+  if (!matches) return false;
+  for (const m of matches) {
+    if (normalizeTimeStr(m) === targetNormalized) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ================================================================
 // PAGE DETECTION — URL-based + structural (no hashed classes)
 // ================================================================
@@ -135,6 +159,18 @@ function isSlotBookingPage() {
   const hasTempleInput = !!document.querySelector('input[name="templeSelected"]');
 
   return hasCalendar || hasSlotCards || hasTempleInput;
+}
+
+function isSpecialEntryPage() {
+  // Special Entry page may have date picker / hourly slots but NO temple/seva dropdowns
+  // Detect by URL containing 'special-entry' or page having hourly slot buttons
+  if (PATH().toLowerCase().includes('special') && PATH().toLowerCase().includes('entry')) return true;
+  if (PATH().toLowerCase().includes('specialentry')) return true;
+  // Also detect by presence of time slot elements (buttons/divs with AM/PM time text)
+  const hasTimeSlots = Array.from(document.querySelectorAll('button, div, span, a'))
+    .some(el => /\d{1,2}:\d{2}\s*(AM|PM)/i.test(el.textContent.trim()) && isVisible(el));
+  const hasCalendar = Array.from(document.querySelectorAll('td')).some(td => /^\d{1,2}$/.test(td.textContent.trim()));
+  return hasTimeSlots && hasCalendar;
 }
 
 function isPilgrimFormPage() {
@@ -226,6 +262,19 @@ async function handleSlotBlocked() {
 
   if (retryBtn) { retryBtn.click(); await sleep(700); }
 
+  if (botConfig.bookingMode === 'special_entry') {
+    const slots = botConfig.preferredSlots || [];
+    currentSlotIndex++;
+    if (currentSlotIndex < slots.length) {
+      sendStatus(`🕐 Slot failed. Trying next preferred slot: ${slots[currentSlotIndex]}`);
+      currentStep = 'SELECTING_SLOT';
+      return;
+    } else {
+      sendStatus(`⚠️ All slots exhausted for date ${botConfig.sevaDate}. Trying next date...`, 'error');
+      currentSlotIndex = 0;
+    }
+  }
+
   const dates = botConfig.preferredDates || [];
   currentDateIndex++;
 
@@ -243,6 +292,8 @@ async function handleSlotBlocked() {
     if (editBtn) {
       editBtn.click();
       await sleep(1200);
+      currentStep = 'SELECTING_SLOT';
+    } else {
       currentStep = 'SELECTING_SLOT';
     }
   } else {
@@ -341,6 +392,7 @@ function isLoggedIn() {
 async function navigateToSeva() {
   // The TTD nav uses a CSS hover dropdown — sub-items are always in DOM but hidden by CSS.
   // Strategy: hover over the "Online Services" <li>, then directly click the target <span>.
+  const isSpecialEntry = botConfig.bookingMode === 'special_entry';
   const navStep = botConfig._navStep || 0;
 
   if (navStep === 0) {
@@ -364,23 +416,24 @@ async function navigateToSeva() {
   }
 
   if (navStep === 1) {
-    // The "Online Services" li is now hovered. Find "Arjitha Sevas" span directly.
-    // Sub-menu items are in DOM regardless of hover — find the span by exact text.
-    const arjithaSpan = Array.from(document.querySelectorAll('li span, li div'))
-      .find(el => el.textContent.trim() === 'Arjitha Sevas');
+    // The "Online Services" li is now hovered.
+    // Branch based on booking mode: find "Arjitha Sevas" or "Special Entry"
+    const targetText = isSpecialEntry ? 'Special Entry' : 'Arjitha Sevas';
+    const targetSpan = Array.from(document.querySelectorAll('li span, li div, li a'))
+      .find(el => el.textContent.trim() === targetText);
 
-    if (arjithaSpan) {
-      sendStatus('🛕 Clicking Arjitha Sevas...');
+    if (targetSpan) {
+      sendStatus(`🛕 Clicking ${targetText}...`);
       // Re-hover Online Services to keep dropdown open, then click
       const onlineSvcLi = Array.from(document.querySelectorAll('li'))
         .find(li => li.textContent.trim().startsWith('Online Services') && isVisible(li));
       if (onlineSvcLi) {
         onlineSvcLi.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
       }
-      clickEl(arjithaSpan);
+      clickEl(targetSpan);
       botConfig._navStep = 2;
     } else {
-      sendStatus('🛕 Arjitha Sevas not found in DOM — retrying...', 'running');
+      sendStatus(`🛕 ${targetText} not found in DOM — retrying...`, 'running');
       botConfig._navStep = 0; // Reset and re-hover
     }
     return;
@@ -388,13 +441,14 @@ async function navigateToSeva() {
 
   if (navStep === 2) {
     // If on slot booking page already, we're done
-    if (isSlotBookingPage()) {
-      sendStatus('✅ Reached slot booking page!');
+    const onBookingPage = isSpecialEntry ? (isSpecialEntryPage() || isSlotBookingPage()) : isSlotBookingPage();
+    if (onBookingPage) {
+      sendStatus(`✅ Reached ${isSpecialEntry ? 'Special Entry' : 'slot booking'} page!`);
       currentStep = 'SELECTING_SLOT';
       return;
     }
     // Done navigating — move to WAITING_CURTAIN
-    sendStatus('🛕 Navigated — waiting for curtain/slot page...');
+    sendStatus(`🛕 Navigated — waiting for ${isSpecialEntry ? 'Special Entry' : 'curtain/slot'} page...`);
     currentStep = 'WAITING_CURTAIN';
   }
 }
@@ -575,6 +629,148 @@ async function selectSlotOptions() {
     else sendStatus(`⚠️ Could not set ticket count to ${botConfig.ticketCount}`);
   } else if (ticketInput && ticketInput.disabled) {
     sendStatus(`🎟️ Ticket count is locked/disabled at: ${ticketInput.value}`);
+  }
+
+  await sleep(100);
+  currentStep = 'CLICKING_CONTINUE_SLOT';
+}
+
+let currentSlotIndex = 0;
+
+async function selectSpecialEntrySlot() {
+  sendStatus(`🎫 [Special Entry] Selecting date: ${botConfig.sevaDate}`);
+
+  // 1. Click the date cell (reuse the same calendar logic)
+  const dateCell = findDateCell(botConfig.sevaDate);
+  if (dateCell) {
+    dateCell.click();
+    sendStatus(`✅ Clicked date: ${botConfig.sevaDate}`);
+    await sleep(500); // Wait for time slots to load
+  } else {
+    sendStatus(`⚠️ Date ${botConfig.sevaDate} not in calendar — trying next date`, 'error');
+    currentDateIndex++;
+    currentSlotIndex = 0; // Reset slot index for the new date
+    const dates = botConfig.preferredDates || [];
+    if (currentDateIndex < dates.length) {
+      botConfig.sevaDate = dates[currentDateIndex];
+      sendStatus(`📅 Trying next: ${botConfig.sevaDate}`);
+    } else {
+      sendStatus('❌ No more preferred dates. Bot stopped.', 'error', true);
+      botActive = false;
+      clearInterval(botInterval);
+    }
+    return;
+  }
+
+  // 2. Find and click the preferred hourly time slot (try each in order)
+  const preferredSlots = botConfig.preferredSlots || [];
+  if (!preferredSlots.length) {
+    sendStatus('⚠️ No preferred time slots configured — please select manually', 'error');
+    currentStep = 'CLICKING_CONTINUE_SLOT';
+    return;
+  }
+
+  const currentSlot = preferredSlots[currentSlotIndex] || '';
+  sendStatus(`🕐 Trying time slot ${currentSlotIndex + 1}/${preferredSlots.length}: ${currentSlot}`);
+
+  const targetNormalized = normalizeTimeStr(currentSlot);
+  if (!targetNormalized) {
+    sendStatus(`⚠️ Preferred slot format invalid: "${currentSlot}". Trying next slot.`, 'error');
+    currentSlotIndex++;
+    return; // Will retry on next tick
+  }
+
+  let targetSlot = null;
+
+  // Strategy 1: Find matching time in clickable elements
+  const candidates = Array.from(document.querySelectorAll('button, div, span, a, td, li'))
+    .filter(el => {
+      if (!isVisible(el)) return false;
+      const t = el.textContent;
+      return elementMatchesTime(t, targetNormalized) &&
+             t.length < 150 &&
+             el.offsetHeight > 10 && el.offsetHeight < 250;
+    });
+
+  // Sort by text length (shortest first = most specific match)
+  candidates.sort((a, b) => a.textContent.trim().length - b.textContent.trim().length);
+
+  if (candidates.length > 0) {
+    targetSlot = candidates[0];
+  }
+
+  // Strategy 2: Look for slot cards with 'available' text + matching time
+  if (!targetSlot) {
+    const slotCards = Array.from(document.querySelectorAll('div, button'))
+      .filter(el => {
+        if (!isVisible(el)) return false;
+        const t = el.textContent;
+        return t.toLowerCase().includes('available') &&
+               elementMatchesTime(t, targetNormalized) &&
+               el.offsetHeight > 10 && el.offsetHeight < 250;
+      });
+    slotCards.sort((a, b) => a.textContent.trim().length - b.textContent.trim().length);
+    if (slotCards.length > 0) targetSlot = slotCards[0];
+  }
+
+  // Strategy 3: Find by radio buttons or input elements near matching time text
+  if (!targetSlot) {
+    const radioInputs = Array.from(document.querySelectorAll('input[type="radio"]'))
+      .filter(el => {
+        const label = el.closest('label') || el.parentElement;
+        return label && elementMatchesTime(label.textContent, targetNormalized);
+      });
+    if (radioInputs.length > 0) {
+      targetSlot = radioInputs[0];
+    }
+  }
+
+  if (targetSlot) {
+    // Shotgun click: click the element, its parents (up to 3 levels), and children
+    clickEl(targetSlot);
+    if (targetSlot.parentElement) clickEl(targetSlot.parentElement);
+    let parent = targetSlot.parentElement;
+    for (let depth = 0; depth < 3; depth++) {
+      if (!parent) break;
+      clickEl(parent);
+      parent = parent.parentElement;
+    }
+    const innerClickables = Array.from(targetSlot.querySelectorAll('button, div, span, input'));
+    for (const el of innerClickables.slice(0, 5)) {
+      clickEl(el);
+    }
+
+    sendStatus(`✅ Time slot selected: ${currentSlot}`);
+    await sleep(300);
+  } else {
+    // Slot not found — try the next preferred slot
+    sendStatus(`⚠️ Time slot "${currentSlot}" not available — trying next`, 'error');
+    currentSlotIndex++;
+    if (currentSlotIndex < preferredSlots.length) {
+      sendStatus(`🕐 Will try slot ${currentSlotIndex + 1}/${preferredSlots.length}: ${preferredSlots[currentSlotIndex]}`);
+      return; // Will retry on next interval tick
+    } else {
+      sendStatus(`⚠️ All ${preferredSlots.length} slots exhausted for ${botConfig.sevaDate} — trying next date`, 'error');
+      currentSlotIndex = 0; // Reset for next date
+      currentDateIndex++;
+      const dates = botConfig.preferredDates || [];
+      if (currentDateIndex < dates.length) {
+        botConfig.sevaDate = dates[currentDateIndex];
+        sendStatus(`📅 Trying next date: ${botConfig.sevaDate}`);
+      } else {
+        sendStatus('❌ All dates and slots exhausted. Bot stopped.', 'error', true);
+        botActive = false;
+        clearInterval(botInterval);
+      }
+      return;
+    }
+  }
+
+  // 3. Check for ticket count dropdown (may or may not exist for Special Entry)
+  const ticketInput = document.querySelector('input[name="noOfTickets"]');
+  if (ticketInput && !ticketInput.disabled) {
+    const result = await selectDropdown(ticketInput, botConfig.ticketCount || '01');
+    if (result) sendStatus(`🎟️ Tickets set to: ${botConfig.ticketCount || '01'}`);
   }
 
   await sleep(100);
@@ -790,6 +986,9 @@ async function runBotStep() {
         if (isQueuePage()) {
           sendStatus('🎟️ Entered queue! Timer running...');
           currentStep = 'IN_QUEUE';
+        } else if (botConfig.bookingMode === 'special_entry' && (isSpecialEntryPage() || isSlotBookingPage())) {
+          sendStatus('✅ Special Entry page detected');
+          currentStep = 'SELECTING_SLOT';
         } else if (isSlotBookingPage()) {
           sendStatus('✅ Slot booking page detected');
           currentStep = 'SELECTING_SLOT';
@@ -816,11 +1015,20 @@ async function runBotStep() {
         break;
 
       case 'SELECTING_SLOT':
-        if (isSlotBookingPage()) {
-          if (!botConfig.sevaDate) {
-            botConfig.sevaDate = (botConfig.preferredDates || [])[currentDateIndex] || '';
+        {
+          const isOnPage = botConfig.bookingMode === 'special_entry'
+            ? (isSpecialEntryPage() || isSlotBookingPage())
+            : isSlotBookingPage();
+          if (isOnPage) {
+            if (!botConfig.sevaDate) {
+              botConfig.sevaDate = (botConfig.preferredDates || [])[currentDateIndex] || '';
+            }
+            if (botConfig.bookingMode === 'special_entry') {
+              await selectSpecialEntrySlot();
+            } else {
+              await selectSlotOptions();
+            }
           }
-          await selectSlotOptions();
         }
         break;
 
@@ -828,6 +1036,29 @@ async function runBotStep() {
         if (await clickContinue()) {
           sendStatus('📋 Moving to Pilgrim Details form...');
           currentStep = 'FILLING_GENERAL';
+        } else {
+          if (botConfig.bookingMode === 'special_entry' && waitContinueLogs >= 3) {
+            sendStatus('⚠️ Continue button remained disabled. Current slot might be unavailable. Trying next slot...', 'error');
+            waitContinueLogs = 0;
+            const slots = botConfig.preferredSlots || [];
+            currentSlotIndex++;
+            if (currentSlotIndex < slots.length) {
+              currentStep = 'SELECTING_SLOT';
+            } else {
+              sendStatus(`⚠️ All slots exhausted for date ${botConfig.sevaDate}. Trying next date...`, 'error');
+              currentSlotIndex = 0;
+              const dates = botConfig.preferredDates || [];
+              currentDateIndex++;
+              if (currentDateIndex < dates.length) {
+                botConfig.sevaDate = dates[currentDateIndex];
+                currentStep = 'SELECTING_SLOT';
+              } else {
+                sendStatus('❌ All dates and slots exhausted. Bot stopped.', 'error', true);
+                botActive = false;
+                if (botInterval) clearInterval(botInterval);
+              }
+            }
+          }
         }
         break;
 
@@ -894,6 +1125,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     botActive = true;
     currentStep = 'LOGIN';
     currentDateIndex = 0;
+    currentSlotIndex = 0; // Reset slot index!
     botConfig.sevaDate = (botConfig.preferredDates || [])[0] || '';
 
     sendStatus('🚀 Bot started! Watching page...');
@@ -913,4 +1145,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-console.log('[TTD-BOT] Content script v3.0 loaded on', window.location.pathname);
+try {
+  const version = chrome.runtime.getManifest().version;
+  console.log(`[TTD-BOT] Content script v${version} loaded on`, window.location.pathname);
+} catch (e) {
+  console.log('[TTD-BOT] Content script loaded on', window.location.pathname);
+}

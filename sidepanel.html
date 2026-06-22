@@ -543,6 +543,152 @@
       color: var(--warning);
       line-height: 1.4;
     }
+
+    /* ── BOOKING MODE TOGGLE ──────────────────────────────── */
+    .mode-toggle {
+      display: flex;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 4px;
+      gap: 4px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: var(--transition);
+      text-align: center;
+      letter-spacing: 0.3px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .mode-btn:hover {
+      color: var(--gold-light);
+      background: rgba(212,175,55,0.04);
+    }
+
+    .mode-btn.active {
+      background: rgba(212,175,55,0.12);
+      border-color: var(--gold-dim);
+      color: var(--gold);
+      font-weight: 600;
+      box-shadow: 0 2px 12px rgba(212,175,55,0.15);
+    }
+
+    .mode-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 20%;
+      right: 20%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      border-radius: 2px;
+    }
+
+    /* ── CONDITIONAL VISIBILITY ───────────────────────────── */
+    .mode-arjitha-only,
+    .mode-special-only {
+      transition: opacity 0.2s ease, max-height 0.3s ease;
+      overflow: hidden;
+    }
+
+    .mode-arjitha-only.hidden,
+    .mode-special-only.hidden {
+      display: none;
+    }
+
+    /* ── SPECIAL ENTRY INFO ───────────────────────────────── */
+    .special-entry-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      background: rgba(212,175,55,0.06);
+      border: 1px solid rgba(212,175,55,0.15);
+      font-size: 11px;
+      color: var(--gold-light);
+      line-height: 1.4;
+    }
+
+    /* ── MASTER PILGRIM CARD ─────────────────────────────── */
+    .master-pilgrim-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.015);
+      gap: 10px;
+    }
+
+    .master-pilgrim-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .master-pilgrim-name {
+      font-weight: 600;
+      color: var(--white);
+    }
+
+    .master-pilgrim-sub {
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .master-pilgrim-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .master-action-btn {
+      background: rgba(212, 175, 55, 0.1);
+      border: 1px solid rgba(212, 175, 55, 0.25);
+      color: var(--gold-light);
+      border-radius: 6px;
+      cursor: pointer;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      transition: var(--transition);
+    }
+
+    .master-action-btn:hover {
+      background: rgba(212, 175, 55, 0.25);
+      border-color: var(--gold);
+    }
+
+    .master-delete-btn {
+      background: rgba(255, 107, 107, 0.1);
+      border: 1px solid rgba(255, 107, 107, 0.25);
+      color: var(--error);
+      border-radius: 6px;
+      cursor: pointer;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      transition: var(--transition);
+    }
+
+    .master-delete-btn:hover {
+      background: rgba(255, 107, 107, 0.25);
+      border-color: var(--error);
+    }
   </style>
 </head>
 <body>
@@ -554,9 +700,9 @@
     <img src="namam.png" alt="Venkateswara Namam" class="header-logo" id="namamLogo">
     <div class="header-text">
       <div class="header-title">🔱 TTD Seva Bot</div>
-      <div class="header-sub">Arjitha Seva Booking</div>
+      <div class="header-sub" id="headerSub">Arjitha Seva Booking</div>
     </div>
-    <div class="header-badge">v2.0</div>
+    <div class="header-badge" id="versionBadge"></div>
   </header>
 
   <!-- ═══ CONTENT ══════════════════════════════════════════ -->
@@ -566,6 +712,16 @@
     <div class="status-bar" id="statusBar">
       <div class="status-dot" id="statusDot"></div>
       <div class="status-text" id="statusText">Bot not started. Configure and click Start.</div>
+    </div>
+
+    <!-- ── BOOKING MODE TOGGLE ───────────────────────────── -->
+    <div class="mode-toggle" id="modeToggle">
+      <button class="mode-btn active" data-mode="arjitha_seva" id="modeArjitha">
+        🛕 Arjitha Seva
+      </button>
+      <button class="mode-btn" data-mode="special_entry" id="modeSpecial">
+        🎫 Special Entry
+      </button>
     </div>
 
     <!-- ── SECTION: Login ─────────────────────────────────── -->
@@ -598,23 +754,38 @@
       </div>
       <div class="section-body">
 
-        <div class="field">
-          <label>Temple</label>
-          <select id="templeName"></select>
+        <!-- Arjitha Seva fields -->
+        <div class="mode-arjitha-only" id="arjithaFields">
+          <div class="field">
+            <label>Temple</label>
+            <select id="templeName"></select>
+          </div>
+
+          <div class="field" style="margin-top:10px">
+            <label>Seva Name</label>
+            <select id="sevaName"></select>
+          </div>
         </div>
 
-        <div class="field">
-          <label>Seva Name</label>
-          <select id="sevaName"></select>
+        <!-- Special Entry fields -->
+        <div class="mode-special-only hidden" id="specialFields">
+          <div class="special-entry-info">
+            🕉️ Special Entry Darshan — no temple/seva selection needed. Pick your date and time slots.
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label>Preferred Time Slots</label>
+            <textarea id="preferredSlots" rows="4" placeholder="10 AM&#10;02 PM&#10;04 PM"></textarea>
+            <span class="field-hint">One per line (e.g. 10 AM, 02 PM). Tries each if slot is full.</span>
+          </div>
         </div>
 
-        <div class="row-2">
+        <div class="row-2" style="margin-top:10px">
           <div class="field">
             <label>Target Time</label>
             <input type="text" id="targetTime" value="10:00:00" placeholder="HH:MM:SS">
             <span class="field-hint">Bot clicks at this exact time</span>
           </div>
-          <div class="field">
+          <div class="field" id="ticketField">
             <label>Tickets</label>
             <select id="ticketCount">
               <option value="01">01</option>
@@ -627,7 +798,7 @@
           </div>
         </div>
 
-        <div class="field">
+        <div class="field" style="margin-top:10px">
           <label>Preferred Dates</label>
           <textarea id="preferredDates" placeholder="15-06-2026&#10;16-06-2026&#10;17-06-2026"></textarea>
           <span class="field-hint">DD-MM-YYYY, one per line. Tries each if slot is blocked.</span>
@@ -692,6 +863,25 @@
         <div id="pilgrimsContainer"></div>
         <button class="btn-add-pilgrim" id="addPilgrim">
           <span>+</span> Add Pilgrim
+        </button>
+      </div>
+    </div>
+
+    <!-- ── SECTION: Pilgrim Master List ────────────────────── -->
+    <div class="section" id="sec-master-list">
+      <div class="section-header" data-section="sec-master-list">
+        <span class="section-icon">👥</span>
+        <span class="section-title">Pilgrim Master List</span>
+        <span class="section-chevron">▼</span>
+      </div>
+      <div class="section-body">
+        <div class="special-entry-info" style="margin-bottom: 8px;">
+          📋 Save active pilgrim details to reuse later. Click "Add" next to a saved pilgrim to load them.
+        </div>
+        <div id="masterListContainer" style="display: flex; flex-direction: column; gap: 8px;"></div>
+        <div class="divider" style="margin: 8px 0;"></div>
+        <button class="btn-add-pilgrim" id="saveActiveToMaster" style="border-style: solid; border-color: var(--gold-dim); color: var(--gold-light);">
+          💾 Save Active Pilgrims to Master List
         </button>
       </div>
     </div>
