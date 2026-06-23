@@ -1,4 +1,4 @@
-# TTD Seva & Special Entry Booking Bot (v4.0)
+# TTD Seva, Special Entry & Angapradakshanam Booking Bot (v4.0)
 
 A premium, glassmorphic Chrome Extension to automate booking on the official Tirumala Tirupati Devasthanams (TTD) ticket portal. Built for speed, resilience, and convenience during high-demand booking releases.
 
@@ -6,9 +6,10 @@ A premium, glassmorphic Chrome Extension to automate booking on the official Tir
 
 ## 🌟 Features
 
-### 1. Dual Booking Modes
+### 1. Booking Modes
 - **🛕 Arjitha Seva**: Choose temple, seva names, preferred dates, and ticket counts.
 - **🎫 Special Entry Darshan (₹300)**: No temple/seva selection required. Auto-selects dates and loops through multiple preferred hourly slots.
+- **🛐 Angapradakshanam**: Shares the same calendar and slot-selection logic as Special Entry. Selects dates, ticket counts, and loops through preferred slots.
 
 ### 2. Pilgrim Master List (Local Persistence)
 - Save frequently booked pilgrim lists securely within the browser (`chrome.storage.local`).
@@ -42,8 +43,8 @@ Open the sidepanel by clicking the extension icon. Fill in the following fields:
 - *Note: You must input the OTP manually in the browser when prompted.*
 
 ### ⏱️ Seva Preferences
-- **Booking Mode**: Toggle between **Arjitha Seva** and **Special Entry**.
-- **Preferred Time Slots** *(Special Entry only)*: List your target times (one per line, e.g., `10 AM`, `02:00 PM`).
+- **Booking Mode**: Toggle between **Arjitha Seva**, **Special Entry**, and **Angapradakshanam**.
+- **Preferred Time Slots** *(Special Entry & Angapradakshanam)*: List your target times (one per line, e.g., `10 AM`, `02:00 PM`).
 - **Target Time**: Set the target release time (HH:MM:SS format). The bot will auto-click and proceed at this exact moment.
 - **Tickets**: Choose the number of tickets to book (1 to 6).
 - **Preferred Dates**: Enter dates in `DD-MM-YYYY` format (one per line). The bot will loop through them in order of priority.

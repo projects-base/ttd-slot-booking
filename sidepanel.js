@@ -28,23 +28,37 @@ function setBookingMode(mode) {
   // Update toggle buttons
   document.getElementById('modeArjitha').classList.toggle('active', mode === 'arjitha_seva');
   document.getElementById('modeSpecial').classList.toggle('active', mode === 'special_entry');
+  document.getElementById('modeAngapradakshanam').classList.toggle('active', mode === 'angapradakshanam');
 
   // Update header subtitle
-  document.getElementById('headerSub').textContent =
-    mode === 'special_entry' ? 'Special Entry Booking' : 'Arjitha Seva Booking';
+  let subtitle = 'Arjitha Seva Booking';
+  if (mode === 'special_entry') subtitle = 'Special Entry Booking';
+  else if (mode === 'angapradakshanam') subtitle = 'Angapradakshanam Booking';
+  document.getElementById('headerSub').textContent = subtitle;
+
+  // Toggle info banner text dynamically
+  const infoEl = document.getElementById('specialInfo');
+  if (infoEl) {
+    if (mode === 'special_entry') {
+      infoEl.textContent = '🕉️ Special Entry Darshan — no temple/seva selection needed. Pick your date and time slots.';
+    } else if (mode === 'angapradakshanam') {
+      infoEl.textContent = '🕉️ Angapradakshanam — no temple/seva selection needed. Pick your date and time slots.';
+    }
+  }
 
   // Toggle field visibility
   document.querySelectorAll('.mode-arjitha-only').forEach(el => {
     el.classList.toggle('hidden', mode !== 'arjitha_seva');
   });
   document.querySelectorAll('.mode-special-only').forEach(el => {
-    el.classList.toggle('hidden', mode !== 'special_entry');
+    el.classList.toggle('hidden', mode !== 'special_entry' && mode !== 'angapradakshanam');
   });
 }
 
 // Wire up mode toggle buttons
 document.getElementById('modeArjitha').addEventListener('click', () => setBookingMode('arjitha_seva'));
 document.getElementById('modeSpecial').addEventListener('click', () => setBookingMode('special_entry'));
+document.getElementById('modeAngapradakshanam').addEventListener('click', () => setBookingMode('angapradakshanam'));
 
 // ── PILGRIM RENDERING ─────────────────────────────────────────
 function renderPilgrims(pilgrims) {
@@ -280,7 +294,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
   // Mode-specific validation
   if (cfg.bookingMode === 'arjitha_seva') {
     // Arjitha Seva needs temple & seva selected (already optional in original, kept for safety)
-  } else if (cfg.bookingMode === 'special_entry') {
+  } else if (cfg.bookingMode === 'special_entry' || cfg.bookingMode === 'angapradakshanam') {
     if (!cfg.preferredSlots || !cfg.preferredSlots.length) {
       setStatus('❌ Add at least one preferred time slot (e.g. 10 AM)', 'error'); return;
     }
@@ -301,7 +315,11 @@ document.getElementById('startBtn').addEventListener('click', () => {
 
   document.getElementById('startBtn').style.display = 'none';
   document.getElementById('stopBtn').style.display  = 'block';
-  const modeLabel = cfg.bookingMode === 'special_entry' ? 'Special Entry' : 'Arjitha Seva';
+  
+  let modeLabel = 'Arjitha Seva';
+  if (cfg.bookingMode === 'special_entry') modeLabel = 'Special Entry';
+  else if (cfg.bookingMode === 'angapradakshanam') modeLabel = 'Angapradakshanam';
+  
   setStatus(`🟡 Bot started (${modeLabel}) — watching page...`, 'running');
 });
 

@@ -164,8 +164,11 @@ function isSlotBookingPage() {
 function isSpecialEntryPage() {
   // Special Entry page may have date picker / hourly slots but NO temple/seva dropdowns
   // Detect by URL containing 'special-entry' or page having hourly slot buttons
-  if (PATH().toLowerCase().includes('special') && PATH().toLowerCase().includes('entry')) return true;
-  if (PATH().toLowerCase().includes('specialentry')) return true;
+  const lowerPath = PATH().toLowerCase();
+  if (lowerPath.includes('special') && lowerPath.includes('entry')) return true;
+  if (lowerPath.includes('specialentry')) return true;
+  if (lowerPath.includes('angapradakshana')) return true;
+  if (lowerPath.includes('angapradakshanam')) return true;
   // Also detect by presence of time slot elements (buttons/divs with AM/PM time text)
   const hasTimeSlots = Array.from(document.querySelectorAll('button, div, span, a'))
     .some(el => /\d{1,2}:\d{2}\s*(AM|PM)/i.test(el.textContent.trim()) && isVisible(el));
@@ -262,7 +265,7 @@ async function handleSlotBlocked() {
 
   if (retryBtn) { retryBtn.click(); await sleep(700); }
 
-  if (botConfig.bookingMode === 'special_entry') {
+  if (botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam') {
     const slots = botConfig.preferredSlots || [];
     currentSlotIndex++;
     if (currentSlotIndex < slots.length) {
@@ -393,6 +396,8 @@ async function navigateToSeva() {
   // The TTD nav uses a CSS hover dropdown — sub-items are always in DOM but hidden by CSS.
   // Strategy: hover over the "Online Services" <li>, then directly click the target <span>.
   const isSpecialEntry = botConfig.bookingMode === 'special_entry';
+  const isAngapradakshanam = botConfig.bookingMode === 'angapradakshanam';
+  const isSpecialOrAnga = isSpecialEntry || isAngapradakshanam;
   const navStep = botConfig._navStep || 0;
 
   if (navStep === 0) {
@@ -417,13 +422,21 @@ async function navigateToSeva() {
 
   if (navStep === 1) {
     // The "Online Services" li is now hovered.
-    // Branch based on booking mode: find "Arjitha Sevas" or "Special Entry"
-    const targetText = isSpecialEntry ? 'Special Entry' : 'Arjitha Sevas';
+    // Branch based on booking mode: find "Arjitha Sevas" or "Special Entry" or "Angapradakshanam"
+    let targetText = 'Arjitha Sevas';
+    if (isSpecialEntry) targetText = 'Special Entry';
+    else if (isAngapradakshanam) targetText = 'Angapradakshanam';
+
     const targetSpan = Array.from(document.querySelectorAll('li span, li div, li a'))
-      .find(el => el.textContent.trim() === targetText);
+      .find(el => {
+        const text = el.textContent.trim().toLowerCase();
+        if (isSpecialEntry) return text === 'special entry';
+        if (isAngapradakshanam) return text.includes('angapradakshana'); // handles spelling variants
+        return text === 'arjitha sevas';
+      });
 
     if (targetSpan) {
-      sendStatus(`🛕 Clicking ${targetText}...`);
+      sendStatus(`🛕 Clicking ${targetSpan.textContent.trim()}...`);
       // Re-hover Online Services to keep dropdown open, then click
       const onlineSvcLi = Array.from(document.querySelectorAll('li'))
         .find(li => li.textContent.trim().startsWith('Online Services') && isVisible(li));
@@ -441,14 +454,14 @@ async function navigateToSeva() {
 
   if (navStep === 2) {
     // If on slot booking page already, we're done
-    const onBookingPage = isSpecialEntry ? (isSpecialEntryPage() || isSlotBookingPage()) : isSlotBookingPage();
+    const onBookingPage = isSpecialOrAnga ? (isSpecialEntryPage() || isSlotBookingPage()) : isSlotBookingPage();
     if (onBookingPage) {
-      sendStatus(`✅ Reached ${isSpecialEntry ? 'Special Entry' : 'slot booking'} page!`);
+      sendStatus(`✅ Reached ${isSpecialOrAnga ? 'booking' : 'slot booking'} page!`);
       currentStep = 'SELECTING_SLOT';
       return;
     }
     // Done navigating — move to WAITING_CURTAIN
-    sendStatus(`🛕 Navigated — waiting for ${isSpecialEntry ? 'Special Entry' : 'curtain/slot'} page...`);
+    sendStatus(`🛕 Navigated — waiting for ${isSpecialOrAnga ? 'Special Entry / Angapradakshanam' : 'curtain/slot'} page...`);
     currentStep = 'WAITING_CURTAIN';
   }
 }
@@ -986,8 +999,8 @@ async function runBotStep() {
         if (isQueuePage()) {
           sendStatus('🎟️ Entered queue! Timer running...');
           currentStep = 'IN_QUEUE';
-        } else if (botConfig.bookingMode === 'special_entry' && (isSpecialEntryPage() || isSlotBookingPage())) {
-          sendStatus('✅ Special Entry page detected');
+        } else if ((botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam') && (isSpecialEntryPage() || isSlotBookingPage())) {
+          sendStatus('✅ Special Entry / Angapradakshanam page detected');
           currentStep = 'SELECTING_SLOT';
         } else if (isSlotBookingPage()) {
           sendStatus('✅ Slot booking page detected');
@@ -1016,14 +1029,15 @@ async function runBotStep() {
 
       case 'SELECTING_SLOT':
         {
-          const isOnPage = botConfig.bookingMode === 'special_entry'
+          const isSpecialOrAnga = botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam';
+          const isOnPage = isSpecialOrAnga
             ? (isSpecialEntryPage() || isSlotBookingPage())
             : isSlotBookingPage();
           if (isOnPage) {
             if (!botConfig.sevaDate) {
               botConfig.sevaDate = (botConfig.preferredDates || [])[currentDateIndex] || '';
             }
-            if (botConfig.bookingMode === 'special_entry') {
+            if (isSpecialOrAnga) {
               await selectSpecialEntrySlot();
             } else {
               await selectSlotOptions();
@@ -1037,7 +1051,7 @@ async function runBotStep() {
           sendStatus('📋 Moving to Pilgrim Details form...');
           currentStep = 'FILLING_GENERAL';
         } else {
-          if (botConfig.bookingMode === 'special_entry' && waitContinueLogs >= 3) {
+          if ((botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam') && waitContinueLogs >= 3) {
             sendStatus('⚠️ Continue button remained disabled. Current slot might be unavailable. Trying next slot...', 'error');
             waitContinueLogs = 0;
             const slots = botConfig.preferredSlots || [];
