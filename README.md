@@ -1,4 +1,4 @@
-# TTD Seva, Special Entry & Angapradakshanam Booking Bot (v5.0)
+# TTD Seva, Special Entry & Angapradakshanam Booking Bot (v5.3)
 
 A premium, glassmorphic Chrome Extension to automate booking on the official Tirumala Tirupati Devasthanams (TTD) ticket portal. Built for speed, resilience, and convenience during high-demand booking releases.
 
