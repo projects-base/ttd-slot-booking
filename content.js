@@ -49,7 +49,7 @@ async function typeIntoField(el, value) {
   const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
   el.focus();
-  await sleep(30);
+  await sleep(10);
 
   // Step 1: Clear — set to '' + notify React (1 re-render, field goes blank)
   if (nativeSetter) nativeSetter.call(el, '');
@@ -57,7 +57,7 @@ async function typeIntoField(el, value) {
     inputType: 'deleteContentBackward',
     bubbles: true
   }));
-  await sleep(20);
+  await sleep(10);
 
   // Step 2: Set full value atomically + notify React (1 re-render, field fills)
   if (nativeSetter) nativeSetter.call(el, strVal);
@@ -75,7 +75,7 @@ async function typeIntoField(el, value) {
 
   el.dispatchEvent(new Event('change', { bubbles: true }));
   el.dispatchEvent(new Event('blur',   { bubbles: true }));
-  await sleep(30);
+  await sleep(10);
 }
 
 function clickEl(el) {
@@ -119,7 +119,7 @@ async function selectDropdown(inputEl, optionText) {
     if (target) {
       inputEl.value = target.value;
       inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-      await sleep(200);
+      await sleep(50);
       return true;
     }
     return false;
@@ -127,7 +127,7 @@ async function selectDropdown(inputEl, optionText) {
 
   // 2. Handle custom React dropdowns
   clickEl(inputEl);
-  await sleep(300); // Give React just enough time to render
+  await sleep(150); // Give React just enough time to render
 
   const lowerText = optionText.toLowerCase();
 
@@ -145,7 +145,7 @@ async function selectDropdown(inputEl, optionText) {
     clickEl(targetItem);
     if (targetItem.parentElement) clickEl(targetItem.parentElement);
 
-    await sleep(100);
+    await sleep(50);
     return true;
   }
 
@@ -304,7 +304,7 @@ async function handleSlotBlocked() {
     : Array.from(document.querySelectorAll('button'))
       .find(b => /retry/i.test(b.textContent.trim()) && isVisible(b));
 
-  if (retryBtn) { retryBtn.click(); await sleep(700); }
+  if (retryBtn) { retryBtn.click(); await sleep(300); }
 
   if (botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam') {
     const slots = botConfig.preferredSlots || [];
@@ -335,7 +335,7 @@ async function handleSlotBlocked() {
 
     if (editBtn) {
       editBtn.click();
-      await sleep(1200);
+      await sleep(500);
       currentStep = 'SELECTING_SLOT';
     } else {
       currentStep = 'SELECTING_SLOT';
@@ -390,7 +390,7 @@ async function doLogin() {
     if (loginBtn) {
       sendStatus('🔐 Clicking Login button to open form...');
       clickEl(loginBtn);
-      await sleep(500);
+      await sleep(300);
     } else {
       sendStatus('🔐 Waiting for login form to appear...', 'running');
     }
@@ -405,7 +405,7 @@ async function doLogin() {
   } else {
     sendStatus('📱 Entering mobile number...');
     await typeIntoField(mobileInput, cleanMobile);
-    await sleep(300);
+    await sleep(100);
   }
 
   // Find and click the "Get OTP" button by text
@@ -626,7 +626,7 @@ async function selectSlotOptions() {
   if (dateCell) {
     dateCell.click();
     sendStatus(`✅ Clicked date: ${botConfig.sevaDate}`);
-    await sleep(300);
+    await sleep(150);
   } else {
     sendStatus(`⚠️ Date ${botConfig.sevaDate} not in calendar — trying next date`, 'error');
     currentDateIndex++;
@@ -670,7 +670,7 @@ async function selectSlotOptions() {
     }
 
     sendStatus('✅ Seva slot card selected');
-    await sleep(100);
+    await sleep(50);
   } else {
     sendStatus('⚠️ Seva card not visible — proceeding anyway');
   }
@@ -685,7 +685,7 @@ async function selectSlotOptions() {
     sendStatus(`🎟️ Ticket count is locked/disabled at: ${ticketInput.value}`);
   }
 
-  await sleep(100);
+  await sleep(50);
   currentStep = 'CLICKING_CONTINUE_SLOT';
 }
 
@@ -699,7 +699,7 @@ async function selectSpecialEntrySlot() {
   if (dateCell) {
     dateCell.click();
     sendStatus(`✅ Clicked date: ${botConfig.sevaDate}`);
-    await sleep(500); // Wait for time slots to load
+    await sleep(200); // Wait for time slots to load
   } else {
     sendStatus(`⚠️ Date ${botConfig.sevaDate} not in calendar — trying next date`, 'error');
     currentDateIndex++;
@@ -795,7 +795,7 @@ async function selectSpecialEntrySlot() {
     }
 
     sendStatus(`✅ Time slot selected: ${currentSlot}`);
-    await sleep(300);
+    await sleep(100);
   } else {
     // Slot not found — try the next preferred slot
     sendStatus(`⚠️ Time slot "${currentSlot}" not available — trying next`, 'error');
@@ -827,7 +827,7 @@ async function selectSpecialEntrySlot() {
     if (result) sendStatus(`🎟️ Tickets set to: ${botConfig.ticketCount || '01'}`);
   }
 
-  await sleep(100);
+  await sleep(50);
   currentStep = 'CLICKING_CONTINUE_SLOT';
 }
 
@@ -838,7 +838,7 @@ async function selectSpecialEntrySlot() {
 
 async function fillGeneralDetails() {
   sendStatus('📋 Filling General Details...');
-  await sleep(100);
+
 
   const g = botConfig.general;
   const fields = {
@@ -906,7 +906,7 @@ function findInputByLabel(container, labelText) {
 
 async function fillPilgrimDetails() {
   sendStatus('👤 Filling Pilgrim Details...');
-  await sleep(600);
+  await sleep(200);
 
   const pilgrimRows = getPilgrimRows();
   const pilgrims = botConfig.pilgrims || [];
@@ -942,7 +942,7 @@ async function fillPilgrimDetails() {
     if (idNumEl && p.idNumber) { await typeIntoField(idNumEl, p.idNumber); }
 
     sendStatus(`✅ Pilgrim ${i + 1} filled: ${p.name}`);
-    await sleep(50);
+    await sleep(20);
   }
 
   currentStep = 'CLICKING_CONTINUE_PILGRIM';
@@ -1137,7 +1137,7 @@ async function runBotStep() {
 
       case 'CLICKING_CONTINUE_REVIEW':
         if (isReviewPage()) {
-          await sleep(800);
+          await sleep(300);
           if (await clickContinue()) {
             const timeStr = botConfig._startTime ? ` (Time taken: ${((Date.now() - botConfig._startTime) / 1000).toFixed(1)}s)` : '';
             sendStatus(`✅ Final Confirm/Pay clicked!`)
@@ -1183,7 +1183,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     sendStatus('🚀 Bot started! Watching page...');
     if (botInterval) clearInterval(botInterval);
-    botInterval = setInterval(runBotStep, 1500);
+    botInterval = setInterval(runBotStep, 800);
     sendResponse({ ok: true });
   }
 
