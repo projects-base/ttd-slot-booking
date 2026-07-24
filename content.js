@@ -24,17 +24,61 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// React-compatible value setter
-function setReactValue(el, value) {
-  if (!el) return;
+// Human-like field typer — the correct React input simulation pattern.
+//
+// How React DOM input works:
+//   1. React attaches a synthetic onChange listener that fires when it sees an
+//      'input' event AND reads el.value to get the current text.
+//   2. So we MUST update el.value (via the native prototype setter, bypassing
+//      React's own value prop) AND fire InputEvent so React's onChange runs.
+//   3. This is different from the old broken approach — the old code used the
+//      setter to SET the entire value at once (which overwrites React's fiber
+//      state silently). Here we increment character-by-character so React sees
+//      each keystroke naturally.
+//
+async function typeIntoField(el, value) {
+  if (!el || value == null) return;
+  const strVal = String(value);
+
+  // Get native value setter — this lets us write to el.value without going
+  // through React's controlled-input override.
   const proto = (el.tagName === 'TEXTAREA')
     ? window.HTMLTextAreaElement.prototype
     : window.HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  if (setter) setter.call(el, value);
-  el.dispatchEvent(new Event('input', { bubbles: true }));
+  const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+
+  el.focus();
+  await sleep(40);
+
+  // Clear the field: set value to '' then fire 'input' so React resets state
+  if (nativeSetter) nativeSetter.call(el, '');
+  el.dispatchEvent(new InputEvent('input', { inputType: 'deleteContentBackward', bubbles: true }));
+  await sleep(30);
+
+  // Type each character: update DOM value incrementally + fire InputEvent
+  let current = '';
+  for (const char of strVal) {
+    current += char;
+
+    el.dispatchEvent(new KeyboardEvent('keydown',  { key: char, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true, cancelable: true }));
+
+    // beforeinput: lets React know a character is about to be inserted
+    el.dispatchEvent(new InputEvent('beforeinput', { data: char, inputType: 'insertText', bubbles: true, cancelable: true }));
+
+    // Set the DOM value so that when React reads el.value in its 'input' handler, it sees the right text
+    if (nativeSetter) nativeSetter.call(el, current);
+
+    // Fire 'input' — React's onChange fires in response to this
+    el.dispatchEvent(new InputEvent('input', { data: char, inputType: 'insertText', bubbles: true }));
+
+    el.dispatchEvent(new KeyboardEvent('keyup',    { key: char, bubbles: true }));
+    await sleep(20);
+  }
+
   el.dispatchEvent(new Event('change', { bubbles: true }));
-  el.dispatchEvent(new Event('blur', { bubbles: true }));
+  el.dispatchEvent(new Event('blur',   { bubbles: true }));
+  await sleep(40);
 }
 
 function clickEl(el) {
@@ -312,11 +356,34 @@ async function handleSlotBlocked() {
 // ================================================================
 
 async function doLogin() {
-  // Step 0: If the mobile input isn't visible, we need to click the Login button first
-  // The TTD login modal has TWO inputs:
-  //  1. A fixed "(+91)" country code prefix (NOT the phone field)
-  //  2. The actual 10-digit phone number input (maxlength="10")
-  let mobileInput = document.querySelector('input[maxlength="10"][type="text"], input[name="mobileNo"], input[placeholder*="mobile" i]');
+  // Find the mobile input: TTD's login modal is a Next.js/React modal with a single
+  // text input for the 10-digit mobile number (prefixed by a "+91" label on the UI).
+  // We try multiple selectors in order of specificity and fall back to the last
+  // visible text input inside any visible modal/dialog.
+  function findMobileInput() {
+    // Strategy 1: explicit attribute selectors
+    const explicit = document.querySelector(
+      'input[maxlength="10"][type="text"], input[maxlength="10"], input[name="mobileNo"], input[name="mobile"], input[placeholder*="mobile" i], input[placeholder*="phone" i], input[placeholder*="number" i]'
+    );
+    if (explicit && isVisible(explicit)) return explicit;
+
+    // Strategy 2: last visible text input inside an open modal/dialog
+    const modal = document.querySelector('dialog, [role="dialog"], [class*="modal" i], [class*="login" i], [class*="popup" i]');
+    if (modal) {
+      const inputs = Array.from(modal.querySelectorAll('input[type="text"], input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"])'));
+      const visible = inputs.filter(isVisible);
+      if (visible.length) return visible[visible.length - 1]; // last one = mobile field
+    }
+
+    // Strategy 3: any visible text input that appears to be for phone numbers
+    const allInputs = Array.from(document.querySelectorAll('input[type="text"], input[type="tel"]'))
+      .filter(isVisible);
+    if (allInputs.length) return allInputs[allInputs.length - 1];
+
+    return null;
+  }
+
+  let mobileInput = findMobileInput();
 
   if (!mobileInput || !isVisible(mobileInput)) {
     // Look for a Login / Sign In button on the page to open the modal
@@ -340,30 +407,7 @@ async function doLogin() {
     sendStatus('📱 Mobile already entered — looking for OTP button...');
   } else {
     sendStatus('📱 Entering mobile number...');
-    mobileInput.focus();
-    mobileInput.click();
-
-    // Clear the field first
-    setReactValue(mobileInput, '');
-    await sleep(100);
-
-    // Type character by character to trigger React's keydown handlers
-    for (const char of cleanMobile) {
-      mobileInput.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-      mobileInput.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
-
-      // Use native setter to append the char
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      const newVal = mobileInput.value + char;
-      if (setter) setter.call(mobileInput, newVal);
-      mobileInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-      mobileInput.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
-      await sleep(30);
-    }
-
-    mobileInput.dispatchEvent(new Event('change', { bubbles: true }));
-    mobileInput.dispatchEvent(new Event('blur', { bubbles: true }));
+    await typeIntoField(mobileInput, cleanMobile);
     await sleep(300);
   }
 
@@ -812,9 +856,7 @@ async function fillGeneralDetails() {
   for (const [fieldName, value] of Object.entries(fields)) {
     const el = document.querySelector(`input[name="${fieldName}"]`);
     if (el && value) {
-      el.focus();
-      setReactValue(el, value);
-      await sleep(50);
+      await typeIntoField(el, value);
     }
   }
 
@@ -887,8 +929,8 @@ async function fillPilgrimDetails() {
     const idTypeEl = row.querySelector('input[name="idType" i], input[name="idProof" i], select[name="idType" i], select[name="idProof" i], input[placeholder*="id" i]') || findInputByLabel(row, 'id proof') || findInputByLabel(row, 'photo id');
     const idNumEl = row.querySelector('input[name="idNumber" i], input[placeholder*="number" i]') || findInputByLabel(row, 'number');
 
-    if (nameEl && p.name) { nameEl.focus(); setReactValue(nameEl, p.name); await sleep(50); }
-    if (ageEl && p.age) { ageEl.focus(); setReactValue(ageEl, String(p.age)); await sleep(50); }
+    if (nameEl && p.name) { await typeIntoField(nameEl, p.name); }
+    if (ageEl && p.age)   { await typeIntoField(ageEl, String(p.age)); }
 
     if (genderEl && p.gender) {
       const ok = await selectDropdown(genderEl, p.gender);
@@ -900,7 +942,7 @@ async function fillPilgrimDetails() {
       if (!ok) sendStatus(`⚠️ Could not set ID type for pilgrim ${i + 1}`);
     }
 
-    if (idNumEl && p.idNumber) { idNumEl.focus(); setReactValue(idNumEl, p.idNumber); await sleep(50); }
+    if (idNumEl && p.idNumber) { await typeIntoField(idNumEl, p.idNumber); }
 
     sendStatus(`✅ Pilgrim ${i + 1} filled: ${p.name}`);
     await sleep(50);
