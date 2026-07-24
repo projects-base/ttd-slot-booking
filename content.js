@@ -24,61 +24,58 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// Human-like field typer — the correct React input simulation pattern.
+// Fills a React-controlled input field atomically — no visible flicker.
 //
-// How React DOM input works:
-//   1. React attaches a synthetic onChange listener that fires when it sees an
-//      'input' event AND reads el.value to get the current text.
-//   2. So we MUST update el.value (via the native prototype setter, bypassing
-//      React's own value prop) AND fire InputEvent so React's onChange runs.
-//   3. This is different from the old broken approach — the old code used the
-//      setter to SET the entire value at once (which overwrites React's fiber
-//      state silently). Here we increment character-by-character so React sees
-//      each keystroke naturally.
+// Why not char-by-char?
+//   Typing one character at a time (with sleep delays) causes React to
+//   re-render after every keystroke, making the field visibly type on screen
+//   like a human — producing noticeable flicker/jitter on fast-filling forms.
+//
+// The correct atomic approach:
+//   1. Use the native prototype setter to bypass React's controlled-input guard
+//      and write directly to el.value (React can't intercept this).
+//   2. Dispatch a proper InputEvent (with inputType + data) so React's synthetic
+//      onChange handler fires and syncs its internal fiber state.
+//   This causes just 2 React re-renders total (clear + set), not one per char.
 //
 async function typeIntoField(el, value) {
   if (!el || value == null) return;
   const strVal = String(value);
 
-  // Get native value setter — this lets us write to el.value without going
-  // through React's controlled-input override.
+  // Get the native value setter — bypasses React's controlled-input wrapper
   const proto = (el.tagName === 'TEXTAREA')
     ? window.HTMLTextAreaElement.prototype
     : window.HTMLInputElement.prototype;
   const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
   el.focus();
-  await sleep(40);
-
-  // Clear the field: set value to '' then fire 'input' so React resets state
-  if (nativeSetter) nativeSetter.call(el, '');
-  el.dispatchEvent(new InputEvent('input', { inputType: 'deleteContentBackward', bubbles: true }));
   await sleep(30);
 
-  // Type each character: update DOM value incrementally + fire InputEvent
-  let current = '';
-  for (const char of strVal) {
-    current += char;
+  // Step 1: Clear — set to '' + notify React (1 re-render, field goes blank)
+  if (nativeSetter) nativeSetter.call(el, '');
+  el.dispatchEvent(new InputEvent('input', {
+    inputType: 'deleteContentBackward',
+    bubbles: true
+  }));
+  await sleep(20);
 
-    el.dispatchEvent(new KeyboardEvent('keydown',  { key: char, bubbles: true, cancelable: true }));
-    el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true, cancelable: true }));
-
-    // beforeinput: lets React know a character is about to be inserted
-    el.dispatchEvent(new InputEvent('beforeinput', { data: char, inputType: 'insertText', bubbles: true, cancelable: true }));
-
-    // Set the DOM value so that when React reads el.value in its 'input' handler, it sees the right text
-    if (nativeSetter) nativeSetter.call(el, current);
-
-    // Fire 'input' — React's onChange fires in response to this
-    el.dispatchEvent(new InputEvent('input', { data: char, inputType: 'insertText', bubbles: true }));
-
-    el.dispatchEvent(new KeyboardEvent('keyup',    { key: char, bubbles: true }));
-    await sleep(20);
-  }
+  // Step 2: Set full value atomically + notify React (1 re-render, field fills)
+  if (nativeSetter) nativeSetter.call(el, strVal);
+  el.dispatchEvent(new InputEvent('beforeinput', {
+    data: strVal,
+    inputType: 'insertText',
+    bubbles: true,
+    cancelable: true
+  }));
+  el.dispatchEvent(new InputEvent('input', {
+    data: strVal,
+    inputType: 'insertText',
+    bubbles: true
+  }));
 
   el.dispatchEvent(new Event('change', { bubbles: true }));
   el.dispatchEvent(new Event('blur',   { bubbles: true }));
-  await sleep(40);
+  await sleep(30);
 }
 
 function clickEl(el) {
