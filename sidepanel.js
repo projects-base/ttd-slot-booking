@@ -19,6 +19,51 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-section]').forEach(header => {
     header.addEventListener('click', () => toggleSection(header.dataset.section));
   });
+  
+  // ── FIREBASE AUTH ───────────────────────────────────────────
+  if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+    const auth = firebase.auth();
+    
+    auth.onAuthStateChanged(user => {
+      const overlay = document.getElementById('loginOverlay');
+      const appContent = document.getElementById('appContent');
+      if (user) {
+        overlay.classList.add('hidden');
+        appContent.style.display = 'flex';
+      } else {
+        overlay.classList.remove('hidden');
+        appContent.style.display = 'none';
+      }
+    });
+
+    document.getElementById('doLoginBtn').addEventListener('click', async () => {
+      const email = document.getElementById('loginEmail').value;
+      const pwd = document.getElementById('loginPassword').value;
+      const errorEl = document.getElementById('loginError');
+      const btn = document.getElementById('doLoginBtn');
+      
+      errorEl.style.display = 'none';
+      btn.textContent = 'Logging in...';
+      
+      try {
+        await auth.signInWithEmailAndPassword(email, pwd);
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+      } finally {
+        btn.textContent = 'Log In';
+      }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      auth.signOut();
+    });
+  } else {
+    console.warn("Firebase SDK or Config not loaded.");
+    // Fallback if config is missing during dev (optional: uncomment to force login overlay block)
+    // document.getElementById('appContent').style.display = 'flex'; 
+    // document.getElementById('loginOverlay').classList.add('hidden');
+  }
 });
 
 // ── BOOKING MODE TOGGLE ───────────────────────────────────────
