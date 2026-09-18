@@ -70,6 +70,51 @@ Open the sidepanel by clicking the extension icon. Fill in the following fields:
 
 ---
 
+## 📦 Building & Releasing
+
+### Local build
+
+```bash
+./scripts/bundle.sh          # -> dist/ttd-seva-bot-<version>.zip
+```
+
+The script zips an explicit file list (not the working tree), so local scratch
+files can never leak into a store upload. It needs `firebase-config.js` present
+— that file is gitignored, so a fresh clone must supply it before building.
+
+### Automated release
+
+`.github/workflows/release.yml` builds the zip and uploads it to the Chrome Web
+Store **as a draft**. Publishing stays manual: review the draft in the developer
+dashboard and click Publish there, which is what submits it to Google's review.
+
+To cut a release, bump `manifest.json` then tag it — the workflow fails fast if
+the tag and the manifest version disagree:
+
+```bash
+git tag v5.4 && git push origin v5.4
+```
+
+You can also run it from the Actions tab; the upload only happens there if you
+tick the `upload` box.
+
+**Required repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | What it is |
+| --- | --- |
+| `FIREBASE_CONFIG_JS` | Full contents of `firebase-config.js`. Without it the bundle installs but stalls behind the login overlay. |
+| `CHROME_EXTENSION_ID` | Item id from the Web Store dashboard URL. |
+| `CHROME_CLIENT_ID` | OAuth client id (Google Cloud console). |
+| `CHROME_CLIENT_SECRET` | OAuth client secret. |
+| `CHROME_REFRESH_TOKEN` | OAuth refresh token for the Web Store API. |
+
+> The built zip is also kept as a workflow artifact for 30 days. It contains
+> `firebase-config.js`, so anyone who can read the repo can download it — the
+> same values ship inside the published extension, but keep that in mind if the
+> repo is public.
+
+---
+
 ## 📜 License
 
 For personal/non-commercial convenience booking. Use responsibly at release times.

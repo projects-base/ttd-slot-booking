@@ -1,0 +1,148 @@
+name: Release
+
+# Builds the extension zip and uploads it to the Chrome Web Store as a DRAFT.
+# Publishing (which submits to Google's review queue) stays manual — you review
+# the draft in the developer dashboard and click Publish there.
+#
+# Triggered by pushing a version tag that matches manifest.json, e.g.
+#   git tag v5.4 && git push origin v5.4
+# or from the Actions tab via "Run workflow".
+#
+# Required repository secrets:
+#   FIREBASE_CONFIG_JS      full contents of firebase-config.js (it is gitignored)
+#   CHROME_EXTENSION_ID     the item id from the Web Store dashboard URL
+#   CHROME_CLIENT_ID        OAuth client id  (Google Cloud console)
+#   CHROME_CLIENT_SECRET    OAuth client secret
+#   CHROME_REFRESH_TOKEN    OAuth refresh token for the Web Store API
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload the bundle to the Chrome Web Store as a draft'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # to attach the zip to a GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check manifest version matches the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(node -p "require('./manifest.json').version")
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME implies version '$tag' but manifest.json says '$manifest'. Bump the manifest or retag."
+            exit 1
+          fi
+          echo "Releasing version $manifest"
+
+      - name: Restore firebase-config.js
+        env:
+          FIREBASE_CONFIG_JS: ${{ secrets.FIREBASE_CONFIG_JS }}
+        run: |
+          if [ -z "$FIREBASE_CONFIG_JS" ]; then
+            echo "::error::Secret FIREBASE_CONFIG_JS is not set. The bundle would ship without Firebase config and the side panel would stall behind the login overlay."
+            exit 1
+          fi
+          printf '%s\n' "$FIREBASE_CONFIG_JS" > firebase-config.js
+          # Fail fast on a malformed secret rather than shipping a broken zip.
+          node --check firebase-config.js
+          node -e "
+            const fs = require('fs');
+            const src = fs.readFileSync('firebase-config.js', 'utf8');
+            for (const key of ['apiKey', 'authDomain', 'projectId', 'appId']) {
+              if (!src.includes(key)) {
+                console.error('::error::firebase-config.js is missing ' + key);
+                process.exit(1);
+              }
+            }
+          "
+
+      - name: Sanity-check the sources parse
+        run: |
+          node --check content.js
+          node --check sidepanel.js
+          node --check background.js
+          node --check data.js
+
+      - name: Bundle
+        id: bundle
+        run: |
+          chmod +x scripts/bundle.sh
+          ./scripts/bundle.sh
+
+      - name: Upload bundle as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttd-seva-bot-${{ steps.bundle.outputs.version }}
+          path: ${{ steps.bundle.outputs.zip }}
+          retention-days: 30
+
+      - name: Upload draft to the Chrome Web Store
+        # Tag pushes always upload; manual runs only when the box is ticked.
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.upload
+        env:
+          ZIP: ${{ steps.bundle.outputs.zip }}
+          EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          for var in EXTENSION_ID CLIENT_ID CLIENT_SECRET REFRESH_TOKEN; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Secret CHROME_$var is not set."
+              exit 1
+            fi
+          done
+
+          echo "Exchanging refresh token for an access token..."
+          token_response=$(curl -sS --fail-with-body -X POST \
+            https://oauth2.googleapis.com/token \
+            -d client_id="$CLIENT_ID" \
+            -d client_secret="$CLIENT_SECRET" \
+            -d refresh_token="$REFRESH_TOKEN" \
+            -d grant_type=refresh_token)
+
+          access_token=$(echo "$token_response" | jq -r '.access_token // empty')
+          if [ -z "$access_token" ]; then
+            # The response can carry an error description but never the token itself.
+            echo "::error::Could not obtain an access token: $(echo "$token_response" | jq -r '.error_description // .error // "unknown error"')"
+            exit 1
+          fi
+
+          echo "Uploading $ZIP to item $EXTENSION_ID..."
+          upload_response=$(curl -sS -X PUT \
+            -H "Authorization: Bearer $access_token" \
+            -H "x-goog-api-version: 2" \
+            -T "$ZIP" \
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$EXTENSION_ID")
+
+          echo "$upload_response" | jq .
+
+          state=$(echo "$upload_response" | jq -r '.uploadState // "UNKNOWN"')
+          if [ "$state" != "SUCCESS" ]; then
+            detail=$(echo "$upload_response" | jq -r '[.itemError[]?.error_detail] | join("; ")')
+            echo "::error::Upload finished with state '$state'. ${detail:-No further detail returned.}"
+            exit 1
+          fi
+
+          echo "::notice::Draft uploaded. Review it in the Chrome Web Store dashboard and click Publish when ready."
+
+      - name: Attach the zip to a GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.bundle.outputs.zip }}
+          generate_release_notes: true
