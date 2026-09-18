@@ -1,12 +1,24 @@
 /* ================================================================
    TTD Seva Booking Bot — sidepanel.js
-   Supports: Arjitha Seva + Special Entry modes
+   Supports: Arjitha Seva + Special Entry Darshan + Angapradakshinam modes
    ================================================================ */
 
 const STORAGE_KEY = 'ttd_bot_v2';
 const MASTER_KEY = 'ttd_master_pilgrims';
-let currentMode = 'arjitha_seva'; // 'arjitha_seva' | 'special_entry'
+
+// Spelled the way the TTD portal spells it: "Angapradakshinam" (…kshi…).
+// Configs saved before this fix used 'angapradakshanam' — see normalizeBookingMode().
+const MODE_ANGAPRADAKSHINAM = 'angapradakshinam';
+
+let currentMode = 'arjitha_seva'; // 'arjitha_seva' | 'special_entry' | 'angapradakshinam'
 let masterPilgrims = [];
+
+function normalizeBookingMode(mode) {
+  const m = String(mode || '').toLowerCase().replace(/[\s._-]/g, '');
+  if (m.startsWith('angapradaksh')) return MODE_ANGAPRADAKSHINAM;
+  if (m === 'specialentry') return 'special_entry';
+  return mode || 'arjitha_seva';
+}
 
 // ── SECTION TOGGLE (via event delegation — inline onclick blocked by CSP) ──
 function toggleSection(id) {
@@ -68,17 +80,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── BOOKING MODE TOGGLE ───────────────────────────────────────
 function setBookingMode(mode) {
-  currentMode = mode;
+  currentMode = normalizeBookingMode(mode);
+  mode = currentMode;
 
   // Update toggle buttons
   document.getElementById('modeArjitha').classList.toggle('active', mode === 'arjitha_seva');
   document.getElementById('modeSpecial').classList.toggle('active', mode === 'special_entry');
-  document.getElementById('modeAngapradakshanam').classList.toggle('active', mode === 'angapradakshanam');
+  document.getElementById('modeAngapradakshinam').classList.toggle('active', mode === MODE_ANGAPRADAKSHINAM);
 
   // Update header subtitle
   let subtitle = 'Arjitha Seva Booking';
   if (mode === 'special_entry') subtitle = 'Special Entry Booking';
-  else if (mode === 'angapradakshanam') subtitle = 'Angapradakshanam Booking';
+  else if (mode === MODE_ANGAPRADAKSHINAM) subtitle = 'Angapradakshinam Booking';
   document.getElementById('headerSub').textContent = subtitle;
 
   // Toggle info banner text dynamically
@@ -86,8 +99,8 @@ function setBookingMode(mode) {
   if (infoEl) {
     if (mode === 'special_entry') {
       infoEl.textContent = '🕉️ Special Entry Darshan — no temple/seva selection needed. Pick your date and time slots.';
-    } else if (mode === 'angapradakshanam') {
-      infoEl.textContent = '🕉️ Angapradakshanam — no temple/seva selection needed. Pick your date and time slots.';
+    } else if (mode === MODE_ANGAPRADAKSHINAM) {
+      infoEl.textContent = '🕉️ Angapradakshinam — no temple/seva selection needed. Pick your date and time slots.';
     }
   }
 
@@ -96,14 +109,14 @@ function setBookingMode(mode) {
     el.classList.toggle('hidden', mode !== 'arjitha_seva');
   });
   document.querySelectorAll('.mode-special-only').forEach(el => {
-    el.classList.toggle('hidden', mode !== 'special_entry' && mode !== 'angapradakshanam');
+    el.classList.toggle('hidden', mode !== 'special_entry' && mode !== MODE_ANGAPRADAKSHINAM);
   });
 }
 
 // Wire up mode toggle buttons
 document.getElementById('modeArjitha').addEventListener('click', () => setBookingMode('arjitha_seva'));
 document.getElementById('modeSpecial').addEventListener('click', () => setBookingMode('special_entry'));
-document.getElementById('modeAngapradakshanam').addEventListener('click', () => setBookingMode('angapradakshanam'));
+document.getElementById('modeAngapradakshinam').addEventListener('click', () => setBookingMode(MODE_ANGAPRADAKSHINAM));
 
 // ── PILGRIM RENDERING ─────────────────────────────────────────
 function renderPilgrims(pilgrims) {
@@ -339,7 +352,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
   // Mode-specific validation
   if (cfg.bookingMode === 'arjitha_seva') {
     // Arjitha Seva needs temple & seva selected (already optional in original, kept for safety)
-  } else if (cfg.bookingMode === 'special_entry' || cfg.bookingMode === 'angapradakshanam') {
+  } else if (cfg.bookingMode === 'special_entry' || cfg.bookingMode === MODE_ANGAPRADAKSHINAM) {
     if (!cfg.preferredSlots || !cfg.preferredSlots.length) {
       setStatus('❌ Add at least one preferred time slot (e.g. 10 AM)', 'error'); return;
     }
@@ -363,7 +376,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
   
   let modeLabel = 'Arjitha Seva';
   if (cfg.bookingMode === 'special_entry') modeLabel = 'Special Entry';
-  else if (cfg.bookingMode === 'angapradakshanam') modeLabel = 'Angapradakshanam';
+  else if (cfg.bookingMode === MODE_ANGAPRADAKSHINAM) modeLabel = 'Angapradakshinam';
   
   setStatus(`🟡 Bot started (${modeLabel}) — watching page...`, 'running');
 });
