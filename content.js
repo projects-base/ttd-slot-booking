@@ -2,7 +2,7 @@
    TTD Seva Booking Bot — content.js
    Selector strategy: NO hashed CSS class names.
    Uses: text content, input[name], ARIA roles, URL paths, DOM structure.
-   Supports: Arjitha Seva + Special Entry booking modes.
+   Supports: Arjitha Seva + Special Entry Darshan + Angapradakshinam booking modes.
    ================================================================ */
 
 let botConfig = null;
@@ -178,6 +178,46 @@ function elementMatchesTime(elText, targetNormalized) {
 }
 
 // ================================================================
+// BOOKING MODES — canonical names
+//
+// The TTD portal spells this seva "Angapradakshinam" (…kshi…), and serves it
+// from the /apd/ (direct booking) and /agp/ (e-DIP) routes. Earlier versions of
+// this extension used the misspelling "angapradakshanam" (…ksha…), which never
+// matched the portal's menu item. Configs saved by those versions are migrated
+// by normalizeBookingMode() so an existing setup keeps working.
+// ================================================================
+
+const MODE_ARJITHA = 'arjitha_seva';
+const MODE_SPECIAL_ENTRY = 'special_entry';
+const MODE_ANGAPRADAKSHINAM = 'angapradakshinam';
+
+function normalizeBookingMode(mode) {
+  const m = String(mode || '').toLowerCase().replace(/[\s._-]/g, '');
+  if (m.startsWith('angapradaksh')) return MODE_ANGAPRADAKSHINAM;
+  if (m === 'specialentry') return MODE_SPECIAL_ENTRY;
+  return mode || MODE_ARJITHA;
+}
+
+// Matches the portal label whichever way it is transliterated —
+// "Angapradakshinam", "Anga Pradakshinam", "Angapradakshanam",
+// "Angapradakshinam (e-DIP for Locals)", …
+function isAngapradakshinamText(text) {
+  return /angapradaksh[ia]nam/.test(String(text || '').toLowerCase().replace(/[\s._-]/g, ''));
+}
+
+function isAngaMode() {
+  return botConfig?.bookingMode === MODE_ANGAPRADAKSHINAM;
+}
+
+function isSpecialEntryMode() {
+  return botConfig?.bookingMode === MODE_SPECIAL_ENTRY;
+}
+
+function isSpecialOrAngaMode() {
+  return isSpecialEntryMode() || isAngaMode();
+}
+
+// ================================================================
 // PAGE DETECTION — URL-based + structural (no hashed classes)
 // ================================================================
 
@@ -208,8 +248,10 @@ function isSpecialEntryPage() {
   const lowerPath = PATH().toLowerCase();
   if (lowerPath.includes('special') && lowerPath.includes('entry')) return true;
   if (lowerPath.includes('specialentry')) return true;
-  if (lowerPath.includes('angapradakshana')) return true;
-  if (lowerPath.includes('angapradakshanam')) return true;
+  if (lowerPath.includes('/sed/')) return true;
+  // Angapradakshinam lives under /apd/ (direct booking) and /agp/ (e-DIP)
+  if (/^\/(apd|agp)(\/|$)/.test(lowerPath)) return true;
+  if (isAngapradakshinamText(lowerPath)) return true;
   // Also detect by presence of time slot elements (buttons/divs with AM/PM time text)
   const hasTimeSlots = Array.from(document.querySelectorAll('button, div, span, a'))
     .some(el => /\d{1,2}:\d{2}\s*(AM|PM)/i.test(el.textContent.trim()) && isVisible(el));
@@ -306,7 +348,7 @@ async function handleSlotBlocked() {
 
   if (retryBtn) { retryBtn.click(); await sleep(450); }
 
-  if (botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam') {
+  if (isSpecialOrAngaMode()) {
     const slots = botConfig.preferredSlots || [];
     currentSlotIndex++;
     if (currentSlotIndex < slots.length) {
@@ -436,9 +478,9 @@ function isLoggedIn() {
 async function navigateToSeva() {
   // The TTD nav uses a CSS hover dropdown — sub-items are always in DOM but hidden by CSS.
   // Strategy: hover over the "Online Services" <li>, then directly click the target <span>.
-  const isSpecialEntry = botConfig.bookingMode === 'special_entry';
-  const isAngapradakshanam = botConfig.bookingMode === 'angapradakshanam';
-  const isSpecialOrAnga = isSpecialEntry || isAngapradakshanam;
+  const isSpecialEntry = isSpecialEntryMode();
+  const isAngapradakshinam = isAngaMode();
+  const isSpecialOrAnga = isSpecialOrAngaMode();
   const navStep = botConfig._navStep || 0;
 
   if (navStep === 0) {
@@ -463,18 +505,24 @@ async function navigateToSeva() {
 
   if (navStep === 1) {
     // The "Online Services" li is now hovered.
-    // Branch based on booking mode: find "Arjitha Sevas" or "Special Entry" or "Angapradakshanam"
+    // Branch based on booking mode: find "Arjitha Sevas" or "Special Entry Darshan"
+    // or "Angapradakshinam" — the portal's own spellings.
     let targetText = 'Arjitha Sevas';
-    if (isSpecialEntry) targetText = 'Special Entry';
-    else if (isAngapradakshanam) targetText = 'Angapradakshanam';
+    if (isSpecialEntry) targetText = 'Special Entry Darshan';
+    else if (isAngapradakshinam) targetText = 'Angapradakshinam';
 
+    // Match loosely on text, then pick the shortest match so we click the menu
+    // item itself and not an ancestor container that merely contains its label.
     const targetSpan = Array.from(document.querySelectorAll('li span, li div, li a'))
-      .find(el => {
+      .filter(el => {
         const text = el.textContent.trim().toLowerCase();
-        if (isSpecialEntry) return text === 'special entry';
-        if (isAngapradakshanam) return text.includes('angapradakshana'); // handles spelling variants
+        // The portal labels this "Special Entry Darshan"; older markup said just
+        // "Special Entry", so accept the prefix rather than an exact match.
+        if (isSpecialEntry) return text.startsWith('special entry');
+        if (isAngapradakshinam) return isAngapradakshinamText(text);
         return text === 'arjitha sevas';
-      });
+      })
+      .sort((a, b) => a.textContent.trim().length - b.textContent.trim().length)[0];
 
     if (targetSpan) {
       sendStatus(`🛕 Clicking ${targetSpan.textContent.trim()}...`);
@@ -502,7 +550,7 @@ async function navigateToSeva() {
       return;
     }
     // Done navigating — move to WAITING_CURTAIN
-    sendStatus(`🛕 Navigated — waiting for ${isSpecialOrAnga ? 'Special Entry / Angapradakshanam' : 'curtain/slot'} page...`);
+    sendStatus(`🛕 Navigated — waiting for ${isSpecialOrAnga ? 'Special Entry / Angapradakshinam' : 'curtain/slot'} page...`);
     currentStep = 'WAITING_CURTAIN';
   }
 }
@@ -1038,8 +1086,8 @@ async function runBotStep() {
         if (isQueuePage()) {
           sendStatus('🎟️ Entered queue! Timer running...');
           currentStep = 'IN_QUEUE';
-        } else if ((botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam') && (isSpecialEntryPage() || isSlotBookingPage())) {
-          sendStatus('✅ Special Entry / Angapradakshanam page detected');
+        } else if (isSpecialOrAngaMode() && (isSpecialEntryPage() || isSlotBookingPage())) {
+          sendStatus('✅ Special Entry / Angapradakshinam page detected');
           currentStep = 'SELECTING_SLOT';
         } else if (isSlotBookingPage()) {
           sendStatus('✅ Slot booking page detected');
@@ -1068,7 +1116,7 @@ async function runBotStep() {
 
       case 'SELECTING_SLOT':
         {
-          const isSpecialOrAnga = botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam';
+          const isSpecialOrAnga = isSpecialOrAngaMode();
           const isOnPage = isSpecialOrAnga
             ? (isSpecialEntryPage() || isSlotBookingPage())
             : isSlotBookingPage();
@@ -1090,7 +1138,7 @@ async function runBotStep() {
           sendStatus('📋 Moving to Pilgrim Details form...');
           currentStep = 'FILLING_GENERAL';
         } else {
-          if ((botConfig.bookingMode === 'special_entry' || botConfig.bookingMode === 'angapradakshanam') && waitContinueLogs >= 3) {
+          if (isSpecialOrAngaMode() && waitContinueLogs >= 3) {
             sendStatus('⚠️ Continue button remained disabled. Current slot might be unavailable. Trying next slot...', 'error');
             waitContinueLogs = 0;
             const slots = botConfig.preferredSlots || [];
@@ -1174,6 +1222,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === 'START_BOT') {
     botConfig = msg.config;
+    botConfig.bookingMode = normalizeBookingMode(botConfig.bookingMode);
     botConfig._startTime = Date.now(); // Record start time
     botActive = true;
     currentStep = 'LOGIN';
