@@ -475,6 +475,45 @@ function isLoggedIn() {
 // Text-based nav clicking — no hashed class names
 // ================================================================
 
+// Resolves a nav menu item from its label.
+//
+// Two things make this harder than a single querySelector:
+//
+//  1. One menu item yields several matches. The markup nests —
+//     <li><a><span>Special Entry Darshan</span></a></li> — so the <a> and its
+//     <span> both match with identical text. We want the <a>, which carries the
+//     click handler.
+//  2. Sibling entries can share a prefix, e.g. "Special Entry Darshan" next to
+//     "Special Entry Darshan (Locals)".
+//
+// So: an exact match on the portal's canonical label wins outright. Only when
+// the portal has renamed the item (no exact hit) do we fall back to the loose
+// matcher, and there prefer the shortest text — the tightest wrapper around the
+// label rather than an ancestor that merely contains it. Equal lengths keep
+// document order, which puts the <a> ahead of its inner <span>.
+function findNavItem(canonicalLabel, looseMatch) {
+  const target = canonicalLabel.trim().toLowerCase();
+
+  const matches = Array.from(document.querySelectorAll('li span, li div, li a'))
+    .map(el => ({ el, text: el.textContent.trim().toLowerCase() }))
+    .filter(c => looseMatch(c.text));
+
+  if (!matches.length) return null;
+
+  const exact = matches.filter(c => c.text === target);
+  const pool = exact.length ? exact : matches;
+
+  // Surface ambiguity — if the portal really does list two similar entries,
+  // this is what tells you which one got clicked and why.
+  const distinct = [...new Set(pool.map(c => c.text))];
+  if (!exact.length && distinct.length > 1) {
+    sendStatus(`⚠️ No exact "${canonicalLabel}" in menu; ${distinct.length} near matches, using the shortest`, 'running');
+    console.log('[TTD-BOT] near matches:', distinct);
+  }
+
+  return pool.sort((a, b) => a.text.length - b.text.length)[0].el;
+}
+
 async function navigateToSeva() {
   // The TTD nav uses a CSS hover dropdown — sub-items are always in DOM but hidden by CSS.
   // Strategy: hover over the "Online Services" <li>, then directly click the target <span>.
@@ -508,21 +547,19 @@ async function navigateToSeva() {
     // Branch based on booking mode: find "Arjitha Sevas" or "Special Entry Darshan"
     // or "Angapradakshinam" — the portal's own spellings.
     let targetText = 'Arjitha Sevas';
-    if (isSpecialEntry) targetText = 'Special Entry Darshan';
-    else if (isAngapradakshinam) targetText = 'Angapradakshinam';
+    let looseMatch = text => text === 'arjitha sevas';
 
-    // Match loosely on text, then pick the shortest match so we click the menu
-    // item itself and not an ancestor container that merely contains its label.
-    const targetSpan = Array.from(document.querySelectorAll('li span, li div, li a'))
-      .filter(el => {
-        const text = el.textContent.trim().toLowerCase();
-        // The portal labels this "Special Entry Darshan"; older markup said just
-        // "Special Entry", so accept the prefix rather than an exact match.
-        if (isSpecialEntry) return text.startsWith('special entry');
-        if (isAngapradakshinam) return isAngapradakshinamText(text);
-        return text === 'arjitha sevas';
-      })
-      .sort((a, b) => a.textContent.trim().length - b.textContent.trim().length)[0];
+    if (isSpecialEntry) {
+      targetText = 'Special Entry Darshan';
+      // Prefix, not equality: the portal has renamed this before (plain
+      // "Special Entry") and may yet append a price like "(Rs.300)".
+      looseMatch = text => text.startsWith('special entry');
+    } else if (isAngapradakshinam) {
+      targetText = 'Angapradakshinam';
+      looseMatch = isAngapradakshinamText;
+    }
+
+    const targetSpan = findNavItem(targetText, looseMatch);
 
     if (targetSpan) {
       sendStatus(`🛕 Clicking ${targetSpan.textContent.trim()}...`);

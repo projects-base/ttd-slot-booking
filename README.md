@@ -1,4 +1,4 @@
-# TTD Seva, Special Entry Darshan & Angapradakshinam Booking Bot (v5.3)
+# TTD Seva, Special Entry Darshan & Angapradakshinam Booking Bot (v6.4)
 
 A premium, glassmorphic Chrome Extension to automate booking on the official Tirumala Tirupati Devasthanams (TTD) ticket portal. Built for speed, resilience, and convenience during high-demand booking releases.
 
@@ -43,11 +43,17 @@ Open the sidepanel by clicking the extension icon. Fill in the following fields:
 - *Note: You must input the OTP manually in the browser when prompted.*
 
 ### ⏱️ Seva Preferences
-- **Booking Mode**: Toggle between **Arjitha Seva**, **Special Entry**, and **Angapradakshinam**.
+- **Booking Mode**: Toggle between **Arjitha Seva**, **Special Entry Darshan**, and **Angapradakshinam**.
 - **Preferred Time Slots** *(Special Entry Darshan & Angapradakshinam)*: List your target times (one per line, e.g., `10 AM`, `02:00 PM`).
 - **Target Time**: Set the target release time (HH:MM:SS format). The bot will auto-click and proceed at this exact moment.
 - **Tickets**: Choose the number of tickets to book (1 to 6).
 - **Preferred Dates**: Enter dates in `DD-MM-YYYY` format (one per line). The bot will loop through them in order of priority.
+  Validated as you type — bad formats, impossible dates (`31-02-2026`), past dates and duplicates are flagged inline and block Start,
+  rather than being silently dropped. Today counts as valid.
+
+> **Your settings save automatically.** Every edit is persisted to `chrome.storage.local`, with an immediate flush when the
+> side panel closes. Earlier versions only saved on **Start Bot**, so anything typed without starting a run was lost and the
+> panel reopened showing the config from the last successful start.
 
 ### 📋 General & Pilgrim Details
 - **General Details**: Gothram, Email, City, State, Country, and Pincode.
@@ -92,7 +98,7 @@ To cut a release, bump `manifest.json` then tag it — the workflow fails fast i
 the tag and the manifest version disagree:
 
 ```bash
-git tag v5.4 && git push origin v5.4
+git tag v6.4 && git push origin v6.4
 ```
 
 You can also run it from the Actions tab; the upload only happens there if you

@@ -180,7 +180,12 @@ function collectPilgrims() {
 function selectedText(id) {
   const sel = document.getElementById(id);
   const idx = sel.selectedIndex;
-  return idx >= 0 ? sel.options[idx].text.trim() : '';
+  if (idx < 0) return '';
+  // The "-- Select Temple --" placeholder carries an empty value while real
+  // options use value === text. Returning its label would make content.js treat
+  // it as a real choice and hunt the portal for a temple by that name.
+  if (!sel.options[idx].value) return '';
+  return sel.options[idx].text.trim();
 }
 
 // Helper: select an option by matching its visible text (value === text, so sel.value works)
@@ -194,13 +199,107 @@ function selectByText(id, text) {
   }
 }
 
+// ── DATE VALIDATION ───────────────────────────────────────────
+//
+// Dates are entered free-form as DD-MM-YYYY, one per line. Previously anything
+// that failed the format regex was silently dropped, so a typo meant the bot
+// quietly skipped that date, and past dates were accepted outright — the bot
+// would then hunt forever for a day the portal's calendar will never offer.
+//
+// Returns { dates, errors } so callers can either use the good dates or report
+// the bad ones line by line.
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Parses DD-MM-YYYY strictly: rejects impossible days like 31-02-2026, which
+// `new Date()` would happily roll over into March.
+function parseDMY(text) {
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(text);
+  if (!m) return null;
+
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+
+  const d = new Date(year, month - 1, day);
+  if (d.getDate() !== day || d.getMonth() !== month - 1 || d.getFullYear() !== year) {
+    return null; // e.g. 31-02-2026 or 00-01-2026
+  }
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function validatePreferredDates(raw) {
+  const today = startOfToday();
+  const dates = [];
+  const errors = [];
+  const seen = new Set();
+
+  raw.split('\n').forEach((line, i) => {
+    const text = line.trim();
+    if (!text) return; // blank lines are not an error
+
+    const lineNo = i + 1;
+    const parsed = parseDMY(text);
+
+    if (!parsed) {
+      errors.push(`Line ${lineNo}: "${text}" is not a valid DD-MM-YYYY date`);
+      return;
+    }
+    if (parsed < today) {
+      errors.push(`Line ${lineNo}: ${text} is in the past`);
+      return;
+    }
+    if (seen.has(text)) {
+      errors.push(`Line ${lineNo}: ${text} is a duplicate`);
+      return;
+    }
+
+    seen.add(text);
+    dates.push(text);
+  });
+
+  return { dates, errors };
+}
+
+// Paints the inline error under the Preferred Dates field. Called on every
+// keystroke so problems surface while typing, not only on Start.
+function refreshDateValidationUI() {
+  const field = document.getElementById('preferredDates');
+  const errorEl = document.getElementById('datesError');
+  if (!field || !errorEl) return [];
+
+  const { errors } = validatePreferredDates(field.value);
+
+  if (errors.length) {
+    field.classList.add('invalid');
+    errorEl.textContent = errors.join(' · ');
+    errorEl.style.display = 'block';
+  } else {
+    field.classList.remove('invalid');
+    errorEl.textContent = '';
+    errorEl.style.display = 'none';
+  }
+
+  return errors;
+}
+
+// Full snapshot of the form, for persistence. Every field is captured
+// regardless of the active mode so switching modes never discards what you
+// typed in the other one. getBotConfig() narrows this for the bot.
 function getConfig() {
   const cfg = {
     bookingMode:    currentMode,
     mobile:         document.getElementById('mobile').value.trim(),
     targetTime:     document.getElementById('targetTime').value.trim(),
-    preferredDates: document.getElementById('preferredDates').value
-      .split('\n').map(d => d.trim()).filter(d => /^\d{2}-\d{2}-\d{4}$/.test(d)),
+    preferredDates: validatePreferredDates(document.getElementById('preferredDates').value).dates,
+    // Kept verbatim so an in-progress line with a typo is not thrown away
+    // when the panel closes mid-edit.
+    preferredDatesRaw: document.getElementById('preferredDates').value,
     general: {
       gothram:  document.getElementById('gothram').value.trim(),
       email:    document.getElementById('email').value.trim(),
@@ -209,23 +308,59 @@ function getConfig() {
       country:  document.getElementById('country').value.trim(),
       pincode:  document.getElementById('pincode').value.trim(),
     },
-    pilgrims: collectPilgrims()
+    pilgrims: collectPilgrims(),
+    sevaName: selectedText('sevaName'),
+    templeName: selectedText('templeName'),
+    preferredSlots: document.getElementById('preferredSlots').value
+      .split('\n').map(s => s.trim()).filter(s => s.length > 0),
   };
 
   cfg.ticketCount = document.getElementById('ticketCount').value.trim() || '01';
 
-  if (currentMode === 'arjitha_seva') {
-    cfg.sevaName    = selectedText('sevaName');
-    cfg.templeName  = selectedText('templeName');
+  return cfg;
+}
+
+// The config handed to content.js. Blanks the fields that do not apply to the
+// active mode — clickSevaAtTime() keys off sevaName being empty to fall back to
+// the generic "Book Now" link, so a stale seva name would misfire there.
+function getBotConfig() {
+  const cfg = getConfig();
+  delete cfg.preferredDatesRaw;
+
+  if (cfg.bookingMode === 'arjitha_seva') {
+    delete cfg.preferredSlots;
   } else {
-    // Special Entry mode
-    cfg.preferredSlots = document.getElementById('preferredSlots').value
-      .split('\n').map(s => s.trim()).filter(s => s.length > 0);
-    cfg.sevaName       = '';
-    cfg.templeName     = '';
+    cfg.sevaName = '';
+    cfg.templeName = '';
   }
 
   return cfg;
+}
+
+// ── PERSISTENCE ───────────────────────────────────────────────
+//
+// The config used to be written only inside the Start Bot handler, and only
+// after validation passed. Anything typed and not started was lost, so the
+// panel always reopened showing the snapshot from the last successful Start —
+// for most runs, whatever was entered on first install.
+//
+// Now every edit is saved (debounced), plus an immediate flush when the panel
+// is hidden or torn down.
+
+let initialLoadDone = false;
+let saveTimer = null;
+
+function saveConfigNow() {
+  // Never persist before the stored config has been read back into the form,
+  // or an empty form would overwrite good data on startup.
+  if (!initialLoadDone) return;
+  chrome.storage.local.set({ [STORAGE_KEY]: getConfig() });
+}
+
+function scheduleSave() {
+  if (!initialLoadDone) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveConfigNow, 400);
 }
 
 function loadConfig(cfg) {
@@ -237,7 +372,10 @@ function loadConfig(cfg) {
   document.getElementById('mobile').value         = cfg.mobile        || '';
   document.getElementById('ticketCount').value    = cfg.ticketCount   || '01';
   document.getElementById('targetTime').value     = cfg.targetTime    || '10:00:00';
-  document.getElementById('preferredDates').value = (cfg.preferredDates || []).join('\n');
+  // Prefer the raw text so a half-typed line survives a panel close; fall back
+  // to the validated list for configs saved before preferredDatesRaw existed.
+  document.getElementById('preferredDates').value = cfg.preferredDatesRaw
+    ?? (cfg.preferredDates || []).join('\n');
   document.getElementById('gothram').value        = cfg.general?.gothram  || '';
   document.getElementById('email').value          = cfg.general?.email    || '';
   document.getElementById('city').value           = cfg.general?.city     || '';
@@ -262,6 +400,13 @@ function loadConfig(cfg) {
       ? cfg.pilgrims
       : [{ name: '', age: '', gender: 'Male', idType: 'Aadhaar Card', idNumber: '' }]
   );
+
+  // Flag any dates that have gone stale since the config was saved — a run
+  // configured last week will have dates that are now in the past.
+  refreshDateValidationUI();
+
+  // Only now is it safe to start persisting edits.
+  initialLoadDone = true;
 }
 
 // ── TEMPLE / SEVA DROPDOWNS ───────────────────────────────────
@@ -301,6 +446,30 @@ populateTemples();
 chrome.storage.local.get(STORAGE_KEY, d => loadConfig(d[STORAGE_KEY] || {}));
 loadMasterPilgrims();
 
+// ── AUTOSAVE WIRING ───────────────────────────────────────────
+//
+// Delegated from the document so pilgrim rows added after load are covered too
+// — they are re-created by renderPilgrims() and would otherwise need rebinding.
+document.addEventListener('input', e => {
+  if (e.target.id === 'preferredDates') refreshDateValidationUI();
+  scheduleSave();
+});
+document.addEventListener('change', scheduleSave);
+
+// A side panel is torn down without warning when closed. visibilitychange and
+// pagehide both fire reliably in extension pages, where beforeunload does not,
+// so flush synchronously on either rather than waiting out the debounce.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    clearTimeout(saveTimer);
+    saveConfigNow();
+  }
+});
+window.addEventListener('pagehide', () => {
+  clearTimeout(saveTimer);
+  saveConfigNow();
+});
+
 // Set version badge dynamically from manifest
 try {
   const version = chrome.runtime.getManifest().version;
@@ -333,14 +502,21 @@ document.getElementById('pilgrimsContainer').addEventListener('click', e => {
 
 // ── START BOT ─────────────────────────────────────────────────
 document.getElementById('startBtn').addEventListener('click', () => {
-  const cfg = getConfig();
+  const cfg = getBotConfig();
 
   // Common validation
   if (!cfg.mobile || cfg.mobile.length !== 10) {
     setStatus('❌ Enter a valid 10-digit mobile number', 'error'); return;
   }
+
+  // Reject bad dates loudly rather than quietly booking only the good ones —
+  // starting a timed run with a silently dropped date is worse than not starting.
+  const dateErrors = refreshDateValidationUI();
+  if (dateErrors.length) {
+    setStatus(`❌ Fix the dates first — ${dateErrors[0]}`, 'error'); return;
+  }
   if (!cfg.preferredDates.length) {
-    setStatus('❌ Add at least one date in DD-MM-YYYY format', 'error'); return;
+    setStatus('❌ Add at least one future date in DD-MM-YYYY format', 'error'); return;
   }
   if (!cfg.pilgrims.length || !cfg.pilgrims[0].name) {
     setStatus('❌ Add at least one pilgrim with a name', 'error'); return;
@@ -358,7 +534,9 @@ document.getElementById('startBtn').addEventListener('click', () => {
     }
   }
 
-  chrome.storage.local.set({ [STORAGE_KEY]: cfg });
+  // Persist the full snapshot, not the narrowed bot config — otherwise starting
+  // in Special Entry mode would wipe the saved temple/seva selection.
+  saveConfigNow();
 
   chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
     if (!tabs[0]) { setStatus('❌ No active tab found', 'error'); return; }
