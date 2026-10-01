@@ -304,6 +304,20 @@
       margin-top: 1px;
     }
 
+    .field-error {
+      font-size: 10px;
+      color: var(--error);
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+
+    .field input.invalid,
+    .field textarea.invalid,
+    .field select.invalid {
+      border-color: rgba(255,107,107,0.55);
+      background: rgba(255,107,107,0.04);
+    }
+
     /* ── ROW GRID ─────────────────────────────────────────── */
     .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
@@ -892,6 +906,7 @@
           <label>Preferred Dates</label>
           <textarea id="preferredDates" placeholder="15-06-2026&#10;16-06-2026&#10;17-06-2026"></textarea>
           <span class="field-hint">DD-MM-YYYY, one per line. Tries each if slot is blocked.</span>
+          <span class="field-error" id="datesError" style="display:none"></span>
         </div>
 
       </div>
