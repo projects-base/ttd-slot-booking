@@ -35,6 +35,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Reports every missing secret in one run. Checking them inside the steps
+      # that use them meant finding out about one per run, which is a slow way
+      # to configure five of them.
+      - name: Preflight — required secrets
+        env:
+          WILL_UPLOAD: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.upload }}
+          FIREBASE_CONFIG_JS: ${{ secrets.FIREBASE_CONFIG_JS }}
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: |
+          missing=()
+          # Only ever tests whether a value is empty — never echoes one.
+          report() {
+            if [ -n "${!1:-}" ]; then
+              printf '  present  %s\n' "$1"
+            else
+              printf '  MISSING  %s\n' "$1"
+              missing+=("$1")
+            fi
+          }
+
+          echo "Secrets visible to this job:"
+          report FIREBASE_CONFIG_JS
+
+          if [ "$WILL_UPLOAD" = "true" ]; then
+            report CHROME_EXTENSION_ID
+            report CHROME_CLIENT_ID
+            report CHROME_CLIENT_SECRET
+            report CHROME_REFRESH_TOKEN
+          else
+            echo "  (CHROME_* not checked — this run does not upload to the store)"
+          fi
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo
+            echo "::error::Missing ${#missing[@]} secret(s): ${missing[*]}"
+            echo "Add them under Settings → Secrets and variables → Actions, on the **Secrets** tab."
+            echo "Three things that make a secret look set but resolve empty here:"
+            echo "  1. It was added on the *Variables* tab instead of *Secrets* (same page, different tab)."
+            echo "  2. It was added as an *Environment* secret. This job declares no environment,"
+            echo "     so environment secrets never resolve — it must be a repository secret."
+            echo "  3. The name does not match exactly: it is case-sensitive, and a trailing space counts."
+            exit 1
+          fi
+
+          echo "All required secrets are present."
+
       - name: Check manifest version matches the tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
