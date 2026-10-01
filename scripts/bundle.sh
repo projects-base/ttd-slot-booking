@@ -61,9 +61,20 @@ mkdir -p dist
 
 # `zip` on CI and Unix; fall back to Python's zipfile so the script also runs
 # in Git Bash on Windows, where `zip` is not installed.
+PY=""
+for cand in python3 python py; do
+  # On Windows, App Execution Aliases put a `python3` on PATH that `command -v`
+  # finds but which only prints "Python was not found" and exits non-zero. So
+  # test that the interpreter actually runs rather than trusting it exists.
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c "import zipfile" >/dev/null 2>&1; then
+    PY="$cand"
+    break
+  fi
+done
+
 if command -v zip >/dev/null 2>&1; then
   zip -q -X "$OUT" "${FILES[@]}"
-elif PY=$(command -v python3 || command -v python); then
+elif [ -n "$PY" ]; then
   "$PY" -c '
 import sys, zipfile
 out, files = sys.argv[1], sys.argv[2:]
