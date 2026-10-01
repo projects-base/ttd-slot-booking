@@ -107,38 +107,71 @@ jobs:
             fi
           done
 
+          # Reads a field out of a response that may not be JSON at all —
+          # Google returns HTML or an empty body for some errors, and letting jq
+          # choke on that would mask the real failure.
+          field() { printf '%s' "$2" | jq -re "$1" 2>/dev/null || true; }
+
+          # curl must not abort the step on an HTTP error: the response body is
+          # where Google explains what went wrong, so capture status and body and
+          # decide for ourselves. -w writes the status on its own trailing line.
           echo "Exchanging refresh token for an access token..."
-          token_response=$(curl -sS --fail-with-body -X POST \
+          token_raw=$(curl -sS -w $'\n%{http_code}' -X POST \
             https://oauth2.googleapis.com/token \
             -d client_id="$CLIENT_ID" \
             -d client_secret="$CLIENT_SECRET" \
             -d refresh_token="$REFRESH_TOKEN" \
-            -d grant_type=refresh_token)
+            -d grant_type=refresh_token) || true
+          token_code=$(printf '%s' "$token_raw" | tail -n1)
+          token_body=$(printf '%s' "$token_raw" | sed '$d')
 
-          access_token=$(echo "$token_response" | jq -r '.access_token // empty')
+          access_token=$(field '.access_token' "$token_body")
           if [ -z "$access_token" ]; then
-            # The response can carry an error description but never the token itself.
-            echo "::error::Could not obtain an access token: $(echo "$token_response" | jq -r '.error_description // .error // "unknown error"')"
+            err=$(field '.error' "$token_body")
+            desc=$(field '.error_description' "$token_body")
+            echo "::error::Token exchange failed (HTTP $token_code): ${err:-unknown} ${desc:+- $desc}"
+            case "$err" in
+              invalid_grant)
+                echo "::error::invalid_grant usually means the refresh token was revoked or expired. Google expires refresh tokens after 7 days while the OAuth consent screen is still in Testing — set it to In production and mint a new token." ;;
+              invalid_client)
+                echo "::error::invalid_client means CHROME_CLIENT_ID / CHROME_CLIENT_SECRET do not match the OAuth client the token was issued for." ;;
+            esac
             exit 1
           fi
 
           echo "Uploading $ZIP to item $EXTENSION_ID..."
-          upload_response=$(curl -sS -X PUT \
+          up_raw=$(curl -sS -w $'\n%{http_code}' -X PUT \
             -H "Authorization: Bearer $access_token" \
             -H "x-goog-api-version: 2" \
             -T "$ZIP" \
-            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$EXTENSION_ID")
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$EXTENSION_ID") || true
+          up_code=$(printf '%s' "$up_raw" | tail -n1)
+          up_body=$(printf '%s' "$up_raw" | sed '$d')
 
-          echo "$upload_response" | jq .
+          echo "HTTP $up_code"
+          printf '%s\n' "$up_body" | jq . 2>/dev/null || printf '%s\n' "$up_body"
 
-          state=$(echo "$upload_response" | jq -r '.uploadState // "UNKNOWN"')
-          if [ "$state" != "SUCCESS" ]; then
-            detail=$(echo "$upload_response" | jq -r '[.itemError[]?.error_detail] | join("; ")')
-            echo "::error::Upload finished with state '$state'. ${detail:-No further detail returned.}"
-            exit 1
-          fi
+          case "$up_code" in
+            404)
+              echo "::error::HTTP 404 for item $EXTENSION_ID. The API can only update an extension that already exists in the store — the first version has to be uploaded by hand in the dashboard. Also check CHROME_EXTENSION_ID, and that the authorised Google account can publish this item."
+              exit 1 ;;
+            401|403)
+              echo "::error::HTTP $up_code. The token is valid but not accepted for this item: confirm the Chrome Web Store API is enabled on the Google Cloud project, and that the account you authorised has publish rights to $EXTENSION_ID."
+              exit 1 ;;
+          esac
 
-          echo "::notice::Draft uploaded. Review it in the Chrome Web Store dashboard and click Publish when ready."
+          state=$(field '.uploadState' "$up_body")
+          case "$state" in
+            SUCCESS)
+              echo "::notice::Draft uploaded. Review it in the Chrome Web Store dashboard and click Publish when ready." ;;
+            IN_PROGRESS)
+              # Large packages finish asynchronously; not a failure.
+              echo "::notice::Upload accepted and still processing. Check the dashboard shortly." ;;
+            *)
+              detail=$(field '[.itemError[]?.error_detail] | join("; ")' "$up_body")
+              echo "::error::Upload finished with state '${state:-unknown}' (HTTP $up_code). ${detail:-No further detail returned.}"
+              exit 1 ;;
+          esac
 
       - name: Attach the zip to a GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
