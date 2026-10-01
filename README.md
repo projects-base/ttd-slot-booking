@@ -1,4 +1,4 @@
-# TTD Seva, Special Entry Darshan & Angapradakshinam Booking Bot (v5.3)
+# TTD Seva, Special Entry Darshan & Angapradakshinam Booking Bot (v6.4)
 
 A premium, glassmorphic Chrome Extension to automate booking on the official Tirumala Tirupati Devasthanams (TTD) ticket portal. Built for speed, resilience, and convenience during high-demand booking releases.
 
@@ -98,7 +98,7 @@ To cut a release, bump `manifest.json` then tag it — the workflow fails fast i
 the tag and the manifest version disagree:
 
 ```bash
-git tag v5.4 && git push origin v5.4
+git tag v6.4 && git push origin v6.4
 ```
 
 You can also run it from the Actions tab; the upload only happens there if you
